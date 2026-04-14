@@ -6,8 +6,10 @@ import json
 import logging
 from typing import Annotated
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cairn.api.broadcast import MessageBroadcaster
 from cairn.api.deps import (
@@ -21,7 +23,7 @@ from cairn.db.connections import DatabaseManager
 from cairn.db.ids import new_id
 from cairn.ingest.parser import ParseError, parse_message
 from cairn.ingest.writer import write_message
-from cairn.models.message import IncomingMessage
+from cairn.models.message import IncomingMessage, PromoteStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["messages"])
@@ -65,12 +67,25 @@ class MessageDetail(MessageSummary):
     ext: dict
 
 
+class PromoteRequest(BaseModel):
+    promote: PromoteStatus = PromoteStatus.CANDIDATE
+    confidence: float | None = Field(None, ge=0.0, le=1.0)
+
+
+class PromoteResponse(BaseModel):
+    id: str
+    promote: str
+    confidence: float | None
+    updated_at: str
+
+
 # ---------------------------------------------------------------------------
 # POST /messages
 # ---------------------------------------------------------------------------
 
 @router.post(
     "/messages",
+    operation_id="post_message",
     status_code=status.HTTP_201_CREATED,
     response_model=PostMessageResponse,
     summary="Post a message to the blackboard",
@@ -146,6 +161,7 @@ async def post_message(
 
 @router.get(
     "/messages",
+    operation_id="query_messages",
     response_model=list[MessageSummary],
     summary="Query messages across topic databases",
     description=(
@@ -268,6 +284,7 @@ async def get_messages(
 
 @router.get(
     "/messages/{message_id}",
+    operation_id="get_message",
     response_model=MessageDetail,
     summary="Retrieve a full message record",
     description=(
@@ -319,4 +336,114 @@ async def get_message(
         raw_content=row["raw_content"],
         frontmatter=json.loads(row["frontmatter"]),
         ext=json.loads(row["ext"]),
+    )
+
+
+# ---------------------------------------------------------------------------
+# PATCH /messages/{id}/promote
+# ---------------------------------------------------------------------------
+
+@router.patch(
+    "/messages/{message_id}/promote",
+    operation_id="flag_for_promotion",
+    response_model=PromoteResponse,
+    summary="Flag a message for promotion",
+    description=(
+        "Updates the promote status of a message.  Only the agent that posted "
+        "the message may change its promote status.  Sets promote=candidate by "
+        "default; humans use the web UI to advance to promoted or rejected."
+    ),
+)
+async def flag_for_promotion(
+    message_id: str,
+    body: PromoteRequest,
+    db_name: Annotated[str, Query(alias="db", description="Topic database slug.")],
+    agent: Annotated[dict, Depends(authenticated_agent)],
+    db: Annotated[DatabaseManager, Depends(get_db_manager)],
+    broadcaster: Annotated[MessageBroadcaster, Depends(get_broadcaster)],
+) -> PromoteResponse:
+    valid_topic_db(db_name, db)
+
+    # Verify the message exists and belongs to the authenticated agent.
+    cursor = await db.topic_conn(db_name).execute(
+        "SELECT id, agent_id, thread_id, message_type, tags, timestamp, ingested_at, tlp_level "
+        "FROM messages WHERE id = :id",
+        {"id": message_id},
+    )
+    row = await cursor.fetchone()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message '{message_id}' not found in database '{db_name}'.",
+        )
+
+    if row["agent_id"] != agent["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Only the authoring agent ('{row['agent_id']}') may change "
+                "the promote status of this message."
+            ),
+        )
+
+    updated_at = datetime.now(tz=timezone.utc).isoformat()
+    new_promote = body.promote.value
+
+    # Update topic DB — primary store.
+    async with db.topic(db_name) as conn:
+        await conn.execute(
+            """
+            UPDATE messages
+               SET promote    = :promote,
+                   confidence = COALESCE(:confidence, confidence)
+             WHERE id = :id
+            """,
+            {"promote": new_promote, "confidence": body.confidence, "id": message_id},
+        )
+
+    # Update message_index — best-effort.
+    try:
+        async with db.index() as conn:
+            await conn.execute(
+                """
+                UPDATE message_index
+                   SET promote    = :promote,
+                       confidence = COALESCE(:confidence, confidence)
+                 WHERE id = :id
+                """,
+                {"promote": new_promote, "confidence": body.confidence, "id": message_id},
+            )
+    except Exception:
+        logger.exception(
+            "Failed to update promote status in message_index for message %s", message_id
+        )
+
+    # Re-read the final confidence value to return the accurate result.
+    cursor = await db.topic_conn(db_name).execute(
+        "SELECT confidence FROM messages WHERE id = :id", {"id": message_id}
+    )
+    final_row = await cursor.fetchone()
+    final_confidence = final_row["confidence"] if final_row else body.confidence
+
+    # Broadcast the updated summary so SSE subscribers see the status change.
+    await broadcaster.broadcast({
+        "id":           message_id,
+        "topic_db":     db_name,
+        "agent_id":     row["agent_id"],
+        "thread_id":    row["thread_id"],
+        "message_type": row["message_type"],
+        "tags":         json.loads(row["tags"]),
+        "confidence":   final_confidence,
+        "tlp_level":    row["tlp_level"],
+        "promote":      new_promote,
+        "timestamp":    row["timestamp"],
+        "ingested_at":  row["ingested_at"],
+    })
+
+    return PromoteResponse(
+        id=message_id,
+        promote=new_promote,
+        confidence=final_confidence,
+        updated_at=updated_at,
     )

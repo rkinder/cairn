@@ -142,6 +142,7 @@ async def _event_generator(
 
 @router.get(
     "/stream",
+    operation_id="subscribe_stream",
     summary="Subscribe to the live message stream",
     description=(
         "SSE endpoint.  Each event is a JSON MessageSummary object.  "

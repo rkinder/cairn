@@ -11,7 +11,7 @@ Usage:
     message_id = new_id()
 """
 
-from uuid7 import uuid7
+from uuid_extensions import uuid7
 
 
 def new_id() -> str:
