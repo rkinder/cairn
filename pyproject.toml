@@ -31,7 +31,8 @@ dev = [
 ]
 
 [project.scripts]
-cairn = "cairn.main:main"
+cairn       = "cairn.main:main"
+cairn-admin = "cairn.manage:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

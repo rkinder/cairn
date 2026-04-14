@@ -13,9 +13,12 @@ Usage:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiosqlite
+
+from cairn.db.ids import new_id
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,21 @@ SCHEMA_FILES: dict[str, str] = {
     "index": "index.sql",
     "osint": "osint.sql",
     "vulnerabilities": "vulnerabilities.sql",
+}
+
+# Human-readable metadata for auto-registration.
+# Extend when adding new topic databases.
+_TOPIC_METADATA: dict[str, dict] = {
+    "osint": {
+        "display_name": "OSINT",
+        "description": "Open-source intelligence: entities, relationships, and sources.",
+        "domain_tags": '["threat-intel", "ioc", "osint"]',
+    },
+    "vulnerabilities": {
+        "display_name": "Vulnerabilities",
+        "description": "CVEs, affected systems, asset exposure, and remediation tracking.",
+        "domain_tags": '["vulnerability", "cve", "remediation"]',
+    },
 }
 
 _SCHEMA_DIR = Path(__file__).parent / "schema"
@@ -59,7 +77,6 @@ async def init_db(db_path: Path, domain: str) -> None:
             await db.executescript(ddl)
             await db.commit()
         else:
-            # Verify the schema metadata table is present.
             cursor = await db.execute(
                 "SELECT value FROM _schema_meta WHERE key = 'schema_version'"
             )
@@ -73,11 +90,54 @@ async def init_db(db_path: Path, domain: str) -> None:
             )
 
 
+async def _register_topic_dbs(index_path: Path, data_dir: Path) -> None:
+    """Ensure all topic databases are registered in index.db's topic_databases table.
+
+    Uses INSERT OR IGNORE so existing registrations are never overwritten.
+    Called by init_all() after all DB files are created.
+
+    The db_path stored in the registry is the bare filename (e.g. 'osint.db'),
+    resolved relative to data_dir at runtime.  This keeps the registry
+    portable if the data directory is moved.
+    """
+    now = datetime.now(tz=timezone.utc).isoformat()
+
+    async with aiosqlite.connect(index_path) as idx:
+        for slug, meta in _TOPIC_METADATA.items():
+            await idx.execute(
+                """
+                INSERT OR IGNORE INTO topic_databases
+                    (id, name, display_name, description, db_path,
+                     schema_version, domain_tags, is_active, created_at, updated_at, ext)
+                VALUES
+                    (:id, :name, :display_name, :description, :db_path,
+                     1, :domain_tags, 1, :now, :now, '{}')
+                """,
+                {
+                    "id":           new_id(),
+                    "name":         slug,
+                    "display_name": meta["display_name"],
+                    "description":  meta["description"],
+                    "db_path":      f"{slug}.db",
+                    "domain_tags":  meta["domain_tags"],
+                    "now":          now,
+                },
+            )
+        await idx.commit()
+        logger.info("Topic database registry up to date in index.db")
+
+
 async def init_all(data_dir: Path) -> dict[str, Path]:
     """Initialize all registered databases under data_dir.
 
-    Creates the data directory if it does not exist. Returns a mapping
+    Creates the data directory if it does not exist.  Returns a mapping
     of domain slug → absolute database path for use by the connection pool.
+
+    Steps:
+      1. Create index.db first (other registrations depend on it).
+      2. Create each topic database file.
+      3. Register all topic databases in index.db's topic_databases table
+         (INSERT OR IGNORE — safe to call on every startup).
 
     Args:
         data_dir: Directory where .db files will be created.
@@ -89,10 +149,18 @@ async def init_all(data_dir: Path) -> dict[str, Path]:
     data_dir = data_dir.resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    paths: dict[str, Path] = {}
+    # index.db must be created first so _register_topic_dbs can write to it.
+    index_path = data_dir / "index.db"
+    await init_db(index_path, "index")
+
+    paths: dict[str, Path] = {"index": index_path}
     for domain in SCHEMA_FILES:
+        if domain == "index":
+            continue
         db_path = data_dir / f"{domain}.db"
         await init_db(db_path, domain)
         paths[domain] = db_path
+
+    await _register_topic_dbs(index_path, data_dir)
 
     return paths
