@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
 from cairn.api.broadcast import MessageBroadcaster
-from cairn.api.deps import authenticated_agent, get_broadcaster, get_db_manager
+from cairn.api.deps import get_broadcaster, get_db_manager, stream_authenticated_agent
 from cairn.db.connections import DatabaseManager
 from cairn.config import get_settings
 
@@ -152,7 +152,7 @@ async def _event_generator(
 )
 async def stream_messages(
     request: Request,
-    _agent: Annotated[dict, Depends(authenticated_agent)],
+    _agent: Annotated[dict, Depends(stream_authenticated_agent)],
     db: Annotated[DatabaseManager, Depends(get_db_manager)],
     broadcaster: Annotated[MessageBroadcaster, Depends(get_broadcaster)],
     since: Annotated[str | None, Query(description="ISO8601 timestamp backfill cursor.")] = None,

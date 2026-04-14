@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from cairn.api.broadcast import MessageBroadcaster
 from cairn.api.routes import messages, stream
@@ -106,6 +108,11 @@ def create_app() -> FastAPI:
 
     app.include_router(messages.router)
     app.include_router(stream.router)
+
+    # Static files for the web UI — served at /ui
+    _ui_dir = Path(__file__).parent.parent / "ui"
+    if _ui_dir.exists():
+        app.mount("/ui", StaticFiles(directory=_ui_dir, html=True), name="ui")
 
     # ---------------------------------------------------------------------------
     # Health check

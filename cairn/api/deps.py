@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import json
 
-from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi import Depends, HTTPException, Query, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from cairn.api.auth import lookup_agent
 from cairn.api.broadcast import MessageBroadcaster
 from cairn.db.connections import DatabaseManager
 
-_bearer = HTTPBearer(auto_error=True)
+_bearer        = HTTPBearer(auto_error=True)
+_bearer_optional = HTTPBearer(auto_error=False)
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +71,34 @@ def valid_topic_db(
                    f"Known databases: {db.known_topics()}",
         )
     return db_name
+
+
+async def stream_authenticated_agent(
+    db: DatabaseManager = Depends(get_db_manager),
+    token: str | None = Query(None, description="API key for EventSource clients that cannot set headers."),
+    credentials: HTTPAuthorizationCredentials | None = Security(_bearer_optional),
+) -> dict:
+    """Authenticate an SSE subscriber via Bearer header or ?token= query param.
+
+    Browser EventSource does not support custom headers, so the UI passes the
+    API key as a query parameter.  Server-side agents should use the
+    Authorization header.
+    """
+    raw_key = (credentials.credentials if credentials else None) or token
+    if not raw_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required: provide a Bearer token or ?token= parameter.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    agent = await lookup_agent(raw_key, db.index_conn)
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired API key.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return agent
 
 
 def agent_can_write(agent: dict, db_name: str) -> None:

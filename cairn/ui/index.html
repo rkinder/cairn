@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cairn Blackboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- marked.js for markdown rendering — loaded from CDN, no build step -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+</head>
+<body>
+
+  <!-- ── Login screen ─────────────────────────────────────────────────── -->
+  <div id="login-screen" class="login-screen hidden">
+    <div class="login-card">
+      <div class="login-logo">◆ Cairn</div>
+      <p class="login-subtitle">Blackboard Intelligence Platform</p>
+      <form id="login-form">
+        <label for="api-key-input">API Key</label>
+        <input
+          id="api-key-input"
+          type="password"
+          placeholder="cairn_…"
+          autocomplete="current-password"
+          required
+        />
+        <button type="submit">Connect</button>
+      </form>
+      <p id="login-error" class="login-error hidden"></p>
+    </div>
+  </div>
+
+  <!-- ── Main application ─────────────────────────────────────────────── -->
+  <div id="app" class="app hidden">
+
+    <!-- Header -->
+    <header class="header">
+      <span class="header-logo">◆ Cairn</span>
+      <span class="header-title">Blackboard</span>
+      <div class="header-right">
+        <span id="stream-indicator" class="stream-indicator disconnected" title="Stream status">
+          <span class="indicator-dot"></span>
+          <span id="stream-label">Connecting…</span>
+        </span>
+        <button id="logout-btn" class="btn-ghost">Logout</button>
+      </div>
+    </header>
+
+    <div class="layout">
+
+      <!-- Sidebar: filters -->
+      <aside class="sidebar">
+        <h2 class="sidebar-heading">Filters</h2>
+
+        <label class="filter-label" for="filter-db">Database</label>
+        <select id="filter-db" class="filter-input">
+          <option value="">All databases</option>
+        </select>
+
+        <label class="filter-label" for="filter-agent">Agent</label>
+        <input id="filter-agent" class="filter-input" type="text" placeholder="agent-id" />
+
+        <label class="filter-label" for="filter-thread">Thread</label>
+        <input id="filter-thread" class="filter-input" type="text" placeholder="thread-id" />
+
+        <label class="filter-label" for="filter-type">Message type</label>
+        <select id="filter-type" class="filter-input">
+          <option value="">All types</option>
+          <option value="finding">finding</option>
+          <option value="alert">alert</option>
+          <option value="hypothesis">hypothesis</option>
+          <option value="query">query</option>
+          <option value="response">response</option>
+          <option value="methodology_ref">methodology_ref</option>
+        </select>
+
+        <label class="filter-label" for="filter-tags">Tags</label>
+        <input id="filter-tags" class="filter-input" type="text" placeholder="apt29, lateral-movement" />
+
+        <label class="filter-label" for="filter-promote">Promote status</label>
+        <select id="filter-promote" class="filter-input">
+          <option value="">Any</option>
+          <option value="candidate">candidate</option>
+          <option value="promoted">promoted</option>
+          <option value="rejected">rejected</option>
+          <option value="none">none</option>
+        </select>
+
+        <button id="apply-filters" class="btn-primary">Apply</button>
+        <button id="clear-filters" class="btn-ghost">Clear</button>
+
+        <div class="sidebar-stats" id="sidebar-stats"></div>
+      </aside>
+
+      <!-- Message list -->
+      <main class="message-list-panel">
+        <div class="panel-header">
+          <h2 class="panel-heading">Messages</h2>
+          <span id="message-count" class="message-count"></span>
+        </div>
+        <div id="message-list" class="message-list">
+          <div class="empty-state" id="empty-state">Loading…</div>
+        </div>
+      </main>
+
+      <!-- Detail panel -->
+      <section class="detail-panel" id="detail-panel">
+        <div class="detail-placeholder" id="detail-placeholder">
+          <p>Select a message to view details</p>
+        </div>
+        <div id="detail-content" class="detail-content hidden">
+          <div class="detail-header">
+            <div class="detail-meta" id="detail-meta"></div>
+            <button id="detail-close" class="btn-ghost detail-close" title="Close">✕</button>
+          </div>
+          <div class="detail-tags" id="detail-tags"></div>
+          <div class="detail-body markdown-body" id="detail-body"></div>
+          <details class="detail-raw">
+            <summary>Raw frontmatter</summary>
+            <pre id="detail-frontmatter"></pre>
+          </details>
+        </div>
+      </section>
+
+    </div><!-- /.layout -->
+  </div><!-- /#app -->
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
