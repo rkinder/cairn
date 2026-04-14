@@ -6,7 +6,14 @@
       "Bash(grep -n \"def write_message\\\\|def parse_message\\\\|def split_frontmatter\" /d/src/python/cairn/cairn/ingest/*.py)",
       "Bash(python -m venv .venv)",
       "Bash(.venv/Scripts/pip install:*)",
-      "Bash(.venv/Scripts/pytest tests/ -v)"
+      "Bash(.venv/Scripts/pytest tests/ -v)",
+      "Bash(.venv/Scripts/pytest tests/test_skill_composer.py tests/test_skill_spec_cache.py tests/test_skill_client.py -v)",
+      "Bash(.venv/Scripts/pip list:*)",
+      "Bash(.venv/Scripts/python -c \"from uuid7 import uuid7; print\\(uuid7\\(\\)\\)\")",
+      "Bash(.venv/Scripts/pip show:*)",
+      "Bash(ls D:/src/python/cairn/.venv/Lib/site-packages/uuid7*)",
+      "Bash(.venv/Scripts/pytest tests/test_skill_composer.py tests/test_skill_spec_cache.py -v)",
+      "Bash(.venv/Scripts/pytest tests/test_skill_client.py -v)"
     ]
   }
 }
