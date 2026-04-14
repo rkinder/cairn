@@ -168,7 +168,8 @@ def build_record(
         raw_content=raw_content,
         # Store the complete frontmatter dict (including ext fields) so that
         # consumers can reconstruct the original envelope from the DB row.
-        frontmatter=frontmatter.model_dump(mode="python"),
+        # mode="json" ensures all values are JSON-serializable (e.g. datetime → str).
+        frontmatter=frontmatter.model_dump(mode="json"),
         body=body,
         ext=frontmatter.ext,
     )

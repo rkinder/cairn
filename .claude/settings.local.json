@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile cairn/**/*.py)",
+      "Bash(python3 -m py_compile cairn/api/app.py cairn/api/routes/messages.py cairn/ingest/parser.py cairn/models/message.py)",
+      "Bash(grep -n \"def write_message\\\\|def parse_message\\\\|def split_frontmatter\" /d/src/python/cairn/cairn/ingest/*.py)",
+      "Bash(python -m venv .venv)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/pytest tests/ -v)"
+    ]
+  }
+}

@@ -137,7 +137,8 @@ class MessageFrontmatter(BaseModel):
 # ---------------------------------------------------------------------------
 
 class IncomingMessage(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    # Do NOT strip whitespace — raw_content must be preserved exactly as posted.
+    model_config = ConfigDict()
 
     raw_content: str = Field(
         ...,
@@ -161,7 +162,8 @@ class IncomingMessage(BaseModel):
 # ---------------------------------------------------------------------------
 
 class MessageRecord(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    # Do NOT strip whitespace globally — raw_content and body must be preserved exactly.
+    model_config = ConfigDict()
 
     # Server-assigned fields
     id:          str       # UUID v7
