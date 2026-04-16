@@ -1,21 +1,28 @@
 version: "3.9"
 
-# Cairn Phase 3 stack
+# Cairn Phase 4 stack
 #
 # Services:
 #   cairn-api  — FastAPI blackboard server (port 8000)
-#   chromadb   — ChromaDB vector store for methodology semantic search (host port 8001)
+#   chromadb   — ChromaDB vector store for methodology + vault-notes semantic search (host port 8001)
 #   gitlab     — GitLab CE for methodology version control (host port 8080 / 2222)
+#   couchdb    — CouchDB for Obsidian LiveSync (host port 5984)
 #
 # Volumes:
-#   cairn_data   — SQLite databases (shared between cairn-api)
+#   cairn_data   — SQLite databases
 #   chroma_data  — ChromaDB persistence
 #   gitlab_*     — GitLab configuration, logs, and data
+#   couchdb_data — CouchDB persistence
+#
+# Bind mounts:
+#   CAIRN_VAULT_PATH (host) → /vault (container) — Obsidian vault directory
+#   The vault must be pre-initialised by Obsidian before starting the stack.
 #
 # Quick start:
-#   cp .env.example .env          # fill in CAIRN_GITLAB_TOKEN, CAIRN_GITLAB_PROJECT_ID
+#   cp .env.example .env          # fill in CAIRN_GITLAB_TOKEN, CAIRN_GITLAB_PROJECT_ID, CAIRN_VAULT_PATH
 #   docker compose up -d
 #   docker compose exec cairn-api cairn-admin init-db
+#   docker compose exec cairn-api cairn-admin migrate
 #   docker compose exec cairn-api cairn-admin agent create --id my-agent --name "My Agent"
 
 services:
@@ -33,6 +40,9 @@ services:
       - "8000:8000"
     volumes:
       - cairn_data:/data
+      # Obsidian vault bind mount — same path inside container as on host
+      # so vault_path in config works consistently.
+      - ${CAIRN_VAULT_PATH:-/vault}:/vault
     environment:
       CAIRN_DATA_DIR: /data
       CAIRN_HOST: 0.0.0.0
@@ -48,6 +58,12 @@ services:
       CAIRN_CHROMA_HOST: chromadb
       CAIRN_CHROMA_PORT: "8000"
       CAIRN_CHROMA_COLLECTION: ${CAIRN_CHROMA_COLLECTION:-methodologies}
+      # Obsidian vault bridge (Phase 4)
+      CAIRN_VAULT_PATH: /vault
+      CAIRN_VAULT_COLLECTION: ${CAIRN_VAULT_COLLECTION:-vault-notes}
+      CAIRN_CORROBORATION_N: ${CAIRN_CORROBORATION_N:-2}
+      CAIRN_CORROBORATION_WINDOW_HOURS: ${CAIRN_CORROBORATION_WINDOW_HOURS:-24}
+      CAIRN_PROMOTION_CONFIDENCE_THRESHOLD: ${CAIRN_PROMOTION_CONFIDENCE_THRESHOLD:-0.7}
       # Security
       CAIRN_SECRET_KEY: ${CAIRN_SECRET_KEY:-change-me-in-production}
     depends_on:
@@ -62,7 +78,7 @@ services:
       start_period: 15s
 
   # ---------------------------------------------------------------------------
-  # ChromaDB — vector store for methodology semantic discovery
+  # ChromaDB — vector store for methodology and vault-notes semantic discovery
   # ---------------------------------------------------------------------------
   chromadb:
     image: chromadb/chroma:latest
@@ -121,6 +137,38 @@ services:
       retries: 10
       start_period: 300s
 
+  # ---------------------------------------------------------------------------
+  # CouchDB — Obsidian LiveSync backend (Phase 4)
+  #
+  # Obsidian LiveSync uses CouchDB to sync the vault between the container
+  # and client devices (laptops, tablets).  Cairn itself only writes files
+  # to the bind-mounted vault directory — CouchDB replication is handled
+  # entirely by the LiveSync plugin configured in each Obsidian client.
+  #
+  # Setup (one-time):
+  #   1. Access the CouchDB admin UI at http://localhost:5984/_utils
+  #   2. Create a database named 'obsidian-vault' (or your preferred name)
+  #   3. In Obsidian LiveSync settings, point to http://<host>:5984 with
+  #      the credentials set here (COUCHDB_USER / COUCHDB_PASSWORD).
+  # ---------------------------------------------------------------------------
+  couchdb:
+    image: couchdb:3
+    container_name: cairn-couchdb
+    ports:
+      - "5984:5984"
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+    environment:
+      COUCHDB_USER: ${COUCHDB_USER:-cairn}
+      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:-change-me-in-production}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5984/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 
 # ---------------------------------------------------------------------------
 # Named volumes
@@ -135,4 +183,6 @@ volumes:
   gitlab_logs:
     driver: local
   gitlab_data:
+    driver: local
+  couchdb_data:
     driver: local

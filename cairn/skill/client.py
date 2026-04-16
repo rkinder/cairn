@@ -141,6 +141,21 @@ class ExecutionRecord:
     created_at:     str
 
 
+@dataclasses.dataclass
+class VaultNoteRef:
+    """Lightweight reference to a promoted Obsidian vault note.
+
+    Full note content is never embedded here — read the file from the vault
+    directory using vault_path when you need the narrative.
+    """
+    vault_path:  str          # vault-relative path (e.g. "cairn/APT29.md")
+    title:       str          # entity name / note title
+    entity_type: str          # ipv4 | ipv6 | fqdn | cve | technique | actor
+    confidence:  float | None # promotion confidence score
+    promoted_at: str          # ISO8601 timestamp
+    score:       float        # similarity score [0, 1]; higher = more relevant
+
+
 # ---------------------------------------------------------------------------
 # BlackboardClient
 # ---------------------------------------------------------------------------
@@ -476,6 +491,45 @@ class BlackboardClient:
             agent_id=data["agent_id"],
             created_at=data["created_at"],
         )
+
+    # ------------------------------------------------------------------
+    # Vault note discovery (Phase 4)
+    # ------------------------------------------------------------------
+
+    async def find_vault_note(
+        self,
+        query: str,
+        n: int = 5,
+    ) -> list[VaultNoteRef]:
+        """Semantic search over promoted Obsidian vault notes.
+
+        Returns ranked VaultNoteRef objects — vault_path, title, entity_type,
+        confidence, and a similarity score.  Full note content is NOT returned;
+        read the file from the vault directory when you need the narrative.
+
+        This should be called before generating analysis on a known entity
+        to check whether prior human-curated knowledge exists.
+
+        Args:
+            query: Natural-language description of the entity or topic.
+            n:     Maximum number of results to return (default 5).
+
+        Returns:
+            List of VaultNoteRef dataclasses ordered by descending score.
+        """
+        _, url = self._spec.resolve_url("search_vault_notes")
+        response = await self._request("GET", url, params={"q": query, "n": n})
+        return [
+            VaultNoteRef(
+                vault_path=item["vault_path"],
+                title=item["title"],
+                entity_type=item["entity_type"],
+                confidence=item.get("confidence"),
+                promoted_at=item["promoted_at"],
+                score=item["score"],
+            )
+            for item in response.json()
+        ]
 
     # ------------------------------------------------------------------
     # Internal HTTP helper
