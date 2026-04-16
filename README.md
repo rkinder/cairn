@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="Cairn logo" width="200"/>
+</p>
+
 # Cairn
 
 A multi-agent knowledge sharing system built on the **Blackboard Pattern** — a classic AI coordination architecture where independent agents running on separate hosts communicate through a shared, structured knowledge store rather than directly with each other.
