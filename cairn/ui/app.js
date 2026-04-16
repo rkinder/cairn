@@ -409,6 +409,207 @@ function escapeHtml(str) {
 }
 
 // ---------------------------------------------------------------------------
+// Promotion Queue
+// ---------------------------------------------------------------------------
+
+const promoState = {
+  candidates: [],
+};
+
+async function loadPromotionCandidates() {
+  const statusVal = document.getElementById('promo-filter-status').value;
+  const qs = statusVal ? `?status=${encodeURIComponent(statusVal)}` : '';
+  try {
+    const data = await apiFetch(`/promotions${qs}`);
+    promoState.candidates = data;
+    renderPromotionList();
+    updatePromotionBadge();
+  } catch (err) {
+    if (err.status === 401) { logout(); return; }
+    document.getElementById('promo-empty-state').textContent = `Failed to load: ${err.message}`;
+  }
+}
+
+function updatePromotionBadge() {
+  const pending = promoState.candidates.filter(c => c.status === 'pending_review').length;
+  const badge = document.getElementById('promotion-badge');
+  if (pending > 0) {
+    badge.textContent = pending;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+function renderPromotionList() {
+  const list = document.getElementById('promotion-list');
+  list.innerHTML = '';
+
+  if (!promoState.candidates.length) {
+    const empty = document.getElementById('promo-empty-state');
+    empty.textContent = 'No promotion candidates match the current filter.';
+    empty.classList.remove('hidden');
+    list.appendChild(empty);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const cand of promoState.candidates) {
+    frag.appendChild(buildPromoCard(cand));
+  }
+  list.appendChild(frag);
+}
+
+function buildPromoCard(cand) {
+  const card = document.createElement('div');
+  card.className = `promo-card status-${cand.status}`;
+  card.dataset.id = cand.id;
+
+  const isPending = cand.status === 'pending_review';
+  const confText = cand.confidence != null ? `conf ${Math.round(cand.confidence * 100)}%` : '';
+  const sourceChips = (cand.source_message_ids || [])
+    .map(id => `<span>${id.slice(0, 8)}…</span>`).join('');
+  const vaultLinkHtml = cand.vault_path
+    ? `<div class="promo-vault-link">📄 ${escapeHtml(cand.vault_path)}</div>` : '';
+
+  card.innerHTML = `
+    <div class="promo-card-header">
+      <span class="promo-entity" title="${escapeHtml(cand.entity)}">${escapeHtml(cand.entity)}</span>
+      <span class="badge badge-type-${CSS.escape(cand.entity_type)}">${escapeHtml(cand.entity_type)}</span>
+      <span class="promo-trigger">${escapeHtml(cand.trigger)}</span>
+      ${promoteBadgeHtml(cand.status.replace('pending_review', 'candidate'))}
+      <span class="promo-chevron">▾</span>
+    </div>
+    <div class="promo-card-body">
+      <div class="promo-meta">
+        <span>${new Date(cand.created_at).toLocaleString()}</span>
+        ${confText ? `<span>${confText}</span>` : ''}
+        ${cand.reviewer_id ? `<span>reviewed by ${escapeHtml(cand.reviewer_id)}</span>` : ''}
+      </div>
+      ${cand.source_message_ids?.length
+        ? `<div class="promo-sources">Sources: ${sourceChips}</div>` : ''}
+      <div>
+        <div class="promo-narrative-label">Narrative (editable before promoting):</div>
+        <textarea class="promo-narrative" ${!isPending ? 'readonly' : ''}
+          rows="4">${escapeHtml(cand.narrative || '')}</textarea>
+      </div>
+      ${vaultLinkHtml}
+      ${isPending ? `
+        <div class="promo-actions">
+          <button class="btn-promote" data-id="${cand.id}">Promote to vault</button>
+          <button class="btn-dismiss" data-id="${cand.id}">Dismiss</button>
+        </div>` : ''}
+    </div>
+  `;
+
+  // Toggle expand/collapse
+  card.querySelector('.promo-card-header').addEventListener('click', () => {
+    card.classList.toggle('expanded');
+    // Show reviewer bar when opening a pending card
+    if (card.classList.contains('expanded') && isPending) {
+      document.getElementById('reviewer-bar').classList.remove('hidden');
+    }
+  });
+
+  // Promote button
+  const promoteBtn = card.querySelector('.btn-promote');
+  if (promoteBtn) {
+    promoteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await doPromote(cand.id, card);
+    });
+  }
+
+  // Dismiss button
+  const dismissBtn = card.querySelector('.btn-dismiss');
+  if (dismissBtn) {
+    dismissBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await doDismiss(cand.id, card);
+    });
+  }
+
+  return card;
+}
+
+async function doPromote(candidateId, card) {
+  const reviewerIdentity = document.getElementById('reviewer-identity').value.trim();
+  if (!reviewerIdentity) {
+    alert('Enter your name or ID in the reviewer bar above before promoting.');
+    return;
+  }
+  const narrative = card.querySelector('.promo-narrative')?.value || '';
+
+  const promoteBtn  = card.querySelector('.btn-promote');
+  const dismissBtn  = card.querySelector('.btn-dismiss');
+  if (promoteBtn)  promoteBtn.disabled  = true;
+  if (dismissBtn)  dismissBtn.disabled  = true;
+
+  try {
+    await apiFetch(`/promotions/${candidateId}/promote`, {
+      method: 'POST',
+      headers: {
+        'X-Human-Reviewer': 'true',
+        'X-Reviewer-Identity': reviewerIdentity,
+      },
+      body: JSON.stringify({ narrative }),
+    });
+    await loadPromotionCandidates();
+  } catch (err) {
+    alert(`Promote failed: ${err.message}`);
+    if (promoteBtn) promoteBtn.disabled = false;
+    if (dismissBtn) dismissBtn.disabled = false;
+  }
+}
+
+async function doDismiss(candidateId, card) {
+  const reviewerIdentity = document.getElementById('reviewer-identity').value.trim();
+  if (!reviewerIdentity) {
+    alert('Enter your name or ID in the reviewer bar above before dismissing.');
+    return;
+  }
+
+  const promoteBtn  = card.querySelector('.btn-promote');
+  const dismissBtn  = card.querySelector('.btn-dismiss');
+  if (promoteBtn) promoteBtn.disabled = true;
+  if (dismissBtn) dismissBtn.disabled = true;
+
+  const reason = prompt('Reason for dismissal (optional):') || '';
+
+  try {
+    await apiFetch(`/promotions/${candidateId}/dismiss`, {
+      method: 'POST',
+      headers: {
+        'X-Human-Reviewer': 'true',
+        'X-Reviewer-Identity': reviewerIdentity,
+      },
+      body: JSON.stringify({ reason }),
+    });
+    await loadPromotionCandidates();
+  } catch (err) {
+    alert(`Dismiss failed: ${err.message}`);
+    if (promoteBtn) promoteBtn.disabled = false;
+    if (dismissBtn) dismissBtn.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
+
+function switchTab(tabName) {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.toggle('hidden', panel.id !== `tab-${tabName}`);
+  });
+  if (tabName === 'promotions') {
+    loadPromotionCandidates();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 
@@ -475,6 +676,15 @@ setInterval(() => {
     if (state.messages[i]) el.textContent = relativeTime(state.messages[i].timestamp);
   });
 }, 60_000);
+
+// Tab buttons
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+// Promotion queue controls
+document.getElementById('promo-filter-status').addEventListener('change', loadPromotionCandidates);
+document.getElementById('promo-refresh').addEventListener('click', loadPromotionCandidates);
 
 // ---------------------------------------------------------------------------
 // Start

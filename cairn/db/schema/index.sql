@@ -2,10 +2,11 @@
 -- All agents hit this database first to discover topic databases
 -- and to perform cross-domain queries without touching topic DBs directly.
 --
--- Schema version: 2
+-- Schema version: 3
 -- Migration strategy: bump _schema_meta 'schema_version' and add
 --   a corresponding migration in cairn/db/migrations/.
 -- v1 → v2: added methodology_executions table (Phase 3).
+-- v2 → v3: added promotion_candidates table (Phase 4).
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -21,7 +22,7 @@ CREATE TABLE IF NOT EXISTS _schema_meta (
 );
 
 INSERT OR IGNORE INTO _schema_meta (key, value) VALUES
-    ('schema_version', '2'),
+    ('schema_version', '3'),
     ('domain',         'index');
 
 
@@ -150,3 +151,37 @@ CREATE INDEX IF NOT EXISTS idx_mex_gitlab_path ON methodology_executions(gitlab_
 CREATE INDEX IF NOT EXISTS idx_mex_agent       ON methodology_executions(agent_id);
 CREATE INDEX IF NOT EXISTS idx_mex_status      ON methodology_executions(status);
 CREATE INDEX IF NOT EXISTS idx_mex_created     ON methodology_executions(created_at);
+
+
+-- ---------------------------------------------------------------------------
+-- Promotion candidates (Phase 4)
+-- Records entities nominated for promotion to the Obsidian vault.
+-- Triggered by: corroboration detection, human queue action, agent confidence.
+--
+-- Only 'promoted' and 'dismissed' are terminal states.  'pending_review' is the
+-- initial state for all three trigger types.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS promotion_candidates (
+    id                  TEXT PRIMARY KEY,       -- UUID v7
+    entity              TEXT NOT NULL,          -- canonical entity value (IP, hostname, CVE ID, etc.)
+    entity_type         TEXT NOT NULL,          -- ipv4 | ipv6 | fqdn | cve | technique | actor
+    trigger             TEXT NOT NULL
+                            CHECK (trigger IN ('corroboration', 'human', 'agent')),
+    status              TEXT NOT NULL DEFAULT 'pending_review'
+                            CHECK (status IN ('pending_review', 'promoted', 'dismissed')),
+    confidence          REAL CHECK (confidence IS NULL OR (confidence BETWEEN 0.0 AND 1.0)),
+    source_message_ids  TEXT NOT NULL DEFAULT '[]', -- JSON array of blackboard message IDs
+    narrative           TEXT NOT NULL DEFAULT '',   -- human-editable note body (markdown)
+    reviewer_id         TEXT,                       -- set when status → promoted or dismissed
+    vault_path          TEXT,                       -- relative path of the note within the vault
+    created_at          TEXT NOT NULL,          -- ISO8601
+    updated_at          TEXT NOT NULL,          -- ISO8601
+    ext                 TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_pc_entity      ON promotion_candidates(entity);
+CREATE INDEX IF NOT EXISTS idx_pc_entity_type ON promotion_candidates(entity_type);
+CREATE INDEX IF NOT EXISTS idx_pc_trigger     ON promotion_candidates(trigger);
+CREATE INDEX IF NOT EXISTS idx_pc_status      ON promotion_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_pc_created     ON promotion_candidates(created_at);

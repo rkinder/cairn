@@ -23,17 +23,19 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from cairn.api.broadcast import MessageBroadcaster
-from cairn.api.routes import messages, methodologies, stream, webhooks
+from cairn.api.routes import messages, methodologies, promotions, stream, vault, webhooks
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
 from cairn.db.init import init_all
 from cairn.ingest.parser import ParseError
+from cairn.jobs.corroboration import run_corroboration_job
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +64,25 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     app.state.broadcaster = broadcaster
 
+    # Start background corroboration detection job (every 15 minutes)
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        run_corroboration_job,
+        "interval",
+        minutes=15,
+        args=[db, settings],
+        id="corroboration",
+        replace_existing=True,
+    )
+    scheduler.start()
+    app.state.scheduler = scheduler
+
     logger.info("Cairn ready — %d topic DB(s) active", len(topic_paths))
 
     yield
 
     # Shutdown
+    scheduler.shutdown(wait=False)
     await db.close()
     logger.info("Cairn shut down cleanly.")
 
@@ -127,6 +143,8 @@ def create_app() -> FastAPI:
     app.include_router(stream.router)
     app.include_router(methodologies.router)
     app.include_router(webhooks.router)
+    app.include_router(promotions.router)
+    app.include_router(vault.router)
 
     # Static files for the web UI — served at /ui
     _ui_dir = Path(__file__).parent.parent / "ui"
