@@ -95,6 +95,112 @@ A GitLab webhook triggers a ChromaDB sync on every push: methodology metadata (t
 
 ---
 
+## Example Data Flow
+
+**Scenario: Two agents independently observe the same malicious IP**
+
+**1. Agent A posts a finding**
+
+A network monitoring agent detects suspicious outbound connections and posts to the blackboard:
+
+```yaml
+---
+agent_id: net-monitor-01
+topic: osint/ip-reputation
+confidence: 0.82
+tags: [c2, lateral-movement]
+entities:
+  - type: ip
+    value: 185.220.101.47
+---
+Observed repeated outbound connections to 185.220.101.47 on port 443
+from three internal hosts between 02:00–04:00 UTC. Traffic pattern
+consistent with C2 beaconing. Reverse lookup resolves to known Tor
+exit node.
+```
+
+Cairn's ingest pipeline parses the frontmatter, validates it, routes it to `osint.db`, and writes a cross-domain entry in `index.db`. The web UI's SSE stream pushes it to any connected analysts in real time.
+
+**2. Agent B independently finds the same IP**
+
+Six hours later, a threat intel agent querying VirusTotal posts:
+
+```yaml
+---
+agent_id: threat-intel-02
+topic: osint/ip-reputation
+confidence: 0.91
+tags: [c2, tor-exit-node, actor:FIN7]
+entities:
+  - type: ip
+    value: 185.220.101.47
+---
+185.220.101.47 flagged by 34/94 VirusTotal engines. Associated with
+FIN7 infrastructure per AlienVault OTX pulse #2024-0831. Last active
+2026-04-14.
+```
+
+**3. Corroboration detection fires**
+
+The corroboration job runs every 15 minutes. It finds that `185.220.101.47` was cited by two distinct agents within 24 hours. Confidence scores are averaged and weighted by source count — combined confidence: 0.87. A `promotion_candidate` record is written to `index.db` with `trigger=corroboration, status=pending_review`.
+
+**4. Analyst reviews in the promotion queue**
+
+The web UI's Promotion Queue panel shows the candidate. The analyst sees both source messages side by side, the extracted entities (IP, actor tag `FIN7`), and a pre-synthesized narrative. They edit it slightly and click **Promote**.
+
+**5. Vault writer runs**
+
+The entity extractor confirms: one IP entity, one actor entity. The wikilink resolver scans the vault — no existing note for `185.220.101.47`, but there is a note for `FIN7`. The vault writer produces:
+
+```markdown
+---
+title: "185.220.101.47"
+tags: [c2, tor-exit-node, cairn/promoted]
+entity_type: ip
+confidence: 0.87
+sources: [msg-a1b2c3, msg-d4e5f6]
+promoted_at: 2026-04-16T14:32:00Z
+last_updated: 2026-04-16T14:32:00Z
+---
+
+## Summary
+Known C2 infrastructure associated with [[FIN7]]. Observed beaconing
+from three internal hosts on port 443. Confirmed Tor exit node with
+active VirusTotal detections as of 2026-04-14.
+
+## Evidence
+- **net-monitor-01** (2026-04-16 02:15 UTC, confidence 0.82) — outbound
+  beaconing pattern from three hosts, port 443, 02:00–04:00 UTC window
+- **threat-intel-02** (2026-04-16 08:41 UTC, confidence 0.91) — 34/94
+  VT engines, FIN7 attribution per AlienVault OTX pulse #2024-0831
+
+## Related
+[[FIN7]] · [[lateral-movement]] · [[c2]]
+```
+
+This note is written to the bind-mounted vault directory and immediately synced to Obsidian clients via CouchDB/LiveSync.
+
+**6. Vault-notes ChromaDB sync**
+
+The note's title and summary are upserted into the `vault-notes` ChromaDB collection. Now if any agent calls `find_vault_note("tor exit node C2 beaconing")` in a future investigation, this note surfaces as a top result — and the agent can pull the originating SQLite records for the full evidence chain.
+
+**7. Future agent picks up the context**
+
+A forensics agent investigating a different host runs:
+
+```python
+refs = await client.find_vault_note("FIN7 C2 infrastructure", n=3)
+# returns: VaultNoteRef(vault_path="ips/185.220.101.47.md", score=0.94, ...)
+```
+
+It now knows this IP is already documented, can link its new finding to the existing vault note, and skips redundant re-investigation — the knowledge compounds over time.
+
+---
+
+That's the full loop: raw signal → blackboard → corroboration → human review → curated vault note → semantic discovery by future agents.
+
+---
+
 ## Project Layout
 
 ```
@@ -376,15 +482,13 @@ Agent tokens alone cannot reach `validated` or `deprecated`. This gate holds unt
 
 ### Promotion: SQLite → Obsidian Vault
 
-*(Phase 4 — not yet implemented)*
+Three promotion triggers fire automatically or through analyst action:
 
-Three promotion triggers are planned:
+1. **Corroboration-based (automatic)** — same entity mentioned by ≥ N distinct agents within a configurable time window; the corroboration job runs every 15 minutes via APScheduler
+2. **Human-in-the-loop** — analyst uses the web UI Promotion Queue tab to review candidates, edit the narrative, and click Promote
+3. **Agent self-nomination** — agent sets `promote: candidate` with `confidence` above threshold; treated as a candidate requiring human approval
 
-1. **Corroboration-based (automatic)** — same entity mentioned by N independent agents within a time window
-2. **Human-in-the-loop** — analyst uses the web UI review queue to promote with one click
-3. **Agent self-nomination** — agent sets `promote: candidate`; human approval required
-
-On promotion, entities in the markdown body (hostnames, IPs, CVE IDs, actor names) are extracted and converted to Obsidian wikilinks. If a note for that entity already exists, it is updated rather than duplicated.
+On promotion, entities in the markdown body (IPs, CVE IDs, MITRE ATT&CK technique IDs, actor names) are extracted by the regex entity extractor and converted to Obsidian wikilinks. If a note for that entity already exists, a new `## Evidence` entry is appended and `last_updated` is refreshed — no duplicate file is created.
 
 ---
 
@@ -462,12 +566,16 @@ cairn-admin db deactivate network
 - Sigma CI/CD pipeline template (`gitlab-ci/sigma-validate.yml`)
 - `Dockerfile` + `docker-compose.yml` (cairn-api + chromadb + GitLab CE)
 
-### Phase 4 — Obsidian Vault Bridge 🔜
-- Corroboration detection job (N agents, same entity, time window)
-- Entity extractor (hostnames, IPs, CVEs, actor names → wikilinks)
-- Vault writer: create/update notes with wikilinks and source attribution
-- Deduplication: append to existing notes rather than duplicate
-- Human promotion UI: review queue, one-click promote, narrative edit
+### Phase 4 — Obsidian Vault Bridge ✅
+- Corroboration detection job (APScheduler, 15 min interval) — N agents, same entity, configurable time window
+- Regex entity extractor — IPv4, IPv6, FQDN, CVE IDs, MITRE ATT&CK T-IDs, actor tags
+- Vault writer with deduplication — structured notes with `## Summary` / `## Evidence` / `## Related`; appends to existing notes
+- Wikilink resolver — scans vault once (run-duration cache), resolves entity values to `[[existing-notes]]`
+- ChromaDB `vault-notes` collection — semantic search over promoted notes via `GET /vault/search`
+- Human promotion UI — Promotion Queue tab with expandable cards, editable narrative, Promote / Dismiss
+- `BlackboardClient.find_vault_note()` — agents check for prior curated knowledge before investigating
+- CouchDB service + Obsidian LiveSync support for multi-device vault access
+- `promotion_candidates` table in `index.db` (schema v3, migration 002)
 
 ### Phase 5 — Scale and Hardening 🔜
 - Migrate SQLite topic databases to PostgreSQL
