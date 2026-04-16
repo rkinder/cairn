@@ -316,7 +316,7 @@ This starts three services:
 ### 3. Initialise databases
 
 ```bash
-docker compose exec cairn-api cairn-admin init-db
+docker exec cairn-api cairn-admin init-db
 ```
 
 This creates `index.db`, `osint.db`, and `vulnerabilities.db` under the mounted data volume with the full schema (v2).
@@ -324,7 +324,7 @@ This creates `index.db`, `osint.db`, and `vulnerabilities.db` under the mounted 
 **Upgrading an existing database (v1 → v2)?**
 
 ```bash
-docker compose exec cairn-api cairn-admin migrate
+docker exec cairn-api cairn-admin migrate
 ```
 
 ### 4. Provision your first agent
