@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from cairn.api.broadcast import MessageBroadcaster
-from cairn.api.routes import messages, stream
+from cairn.api.routes import messages, methodologies, stream, webhooks
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
 from cairn.db.init import init_all
@@ -125,6 +125,8 @@ def create_app() -> FastAPI:
 
     app.include_router(messages.router)
     app.include_router(stream.router)
+    app.include_router(methodologies.router)
+    app.include_router(webhooks.router)
 
     # Static files for the web UI — served at /ui
     _ui_dir = Path(__file__).parent.parent / "ui"

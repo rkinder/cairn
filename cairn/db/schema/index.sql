@@ -2,9 +2,10 @@
 -- All agents hit this database first to discover topic databases
 -- and to perform cross-domain queries without touching topic DBs directly.
 --
--- Schema version: 1
+-- Schema version: 2
 -- Migration strategy: bump _schema_meta 'schema_version' and add
 --   a corresponding migration in cairn/db/migrations/.
+-- v1 → v2: added methodology_executions table (Phase 3).
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -20,7 +21,7 @@ CREATE TABLE IF NOT EXISTS _schema_meta (
 );
 
 INSERT OR IGNORE INTO _schema_meta (key, value) VALUES
-    ('schema_version', '1'),
+    ('schema_version', '2'),
     ('domain',         'index');
 
 
@@ -116,3 +117,36 @@ CREATE INDEX IF NOT EXISTS idx_midx_type       ON message_index(message_type);
 CREATE INDEX IF NOT EXISTS idx_midx_timestamp  ON message_index(timestamp);
 CREATE INDEX IF NOT EXISTS idx_midx_promote    ON message_index(promote);
 CREATE INDEX IF NOT EXISTS idx_midx_tlp        ON message_index(tlp_level);
+
+
+-- ---------------------------------------------------------------------------
+-- Methodology execution records (Phase 3)
+-- Tracks each time an agent executes a methodology from the GitLab repo.
+--
+-- Design constraint: methodology text NEVER lives here. Only the GitLab path
+-- and commit SHA are stored so the exact version run can always be retrieved.
+-- Execution history and outcomes live here; content lives in GitLab.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS methodology_executions (
+    id                  TEXT PRIMARY KEY,       -- UUID v7
+    methodology_id      TEXT NOT NULL,          -- logical ID (Sigma 'name' field or path-based)
+    gitlab_path         TEXT NOT NULL,          -- full path in repo (e.g. methodologies/apt29/named-pipe.yml)
+    commit_sha          TEXT NOT NULL,          -- exact commit SHA that was executed
+    status              TEXT NOT NULL DEFAULT 'proposed'
+                            CHECK (status IN ('proposed', 'peer_reviewed', 'validated', 'deprecated')),
+    parent_version      TEXT,                   -- commit SHA of the parent methodology (lineage)
+    agent_id            TEXT NOT NULL,          -- agent that ran this methodology
+    result_message_ids  TEXT NOT NULL DEFAULT '[]', -- JSON array of blackboard message IDs from this run
+    reviewer_id         TEXT,                   -- set when status transitions to 'validated'
+    notes               TEXT NOT NULL DEFAULT '',   -- optional reviewer/transition notes
+    created_at          TEXT NOT NULL,          -- ISO8601
+    updated_at          TEXT NOT NULL,          -- ISO8601
+    ext                 TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_mex_methodology ON methodology_executions(methodology_id);
+CREATE INDEX IF NOT EXISTS idx_mex_gitlab_path ON methodology_executions(gitlab_path);
+CREATE INDEX IF NOT EXISTS idx_mex_agent       ON methodology_executions(agent_id);
+CREATE INDEX IF NOT EXISTS idx_mex_status      ON methodology_executions(status);
+CREATE INDEX IF NOT EXISTS idx_mex_created     ON methodology_executions(created_at);
