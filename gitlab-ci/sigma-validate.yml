@@ -1,0 +1,107 @@
+# Cairn — Sigma rule validation pipeline
+#
+# Include this template in your methodology GitLab project's .gitlab-ci.yml:
+#
+#   include:
+#     - project: 'security-team/cairn'
+#       file: 'gitlab-ci/sigma-validate.yml'
+#
+# Or copy the job definition directly into your project's CI configuration.
+#
+# What this does
+# --------------
+# Validates every .yml file under the sigma/ directory using sigma-cli.
+# The pipeline fails if any rule is structurally invalid, preventing
+# broken detection logic from reaching a validated state.
+#
+# Requirements in the methodology repo
+# -------------------------------------
+# - Sigma rules must live under a sigma/ directory at the repo root.
+# - Rules must be valid YAML with the required Sigma fields (title, logsource,
+#   detection). See https://github.com/SigmaHQ/sigma for the spec.
+#
+# See docs/sigma-ci.md in the cairn repo for setup instructions.
+
+stages:
+  - validate
+
+.sigma-base:
+  image: python:3.11-slim
+  before_script:
+    - pip install --quiet sigma-cli
+    - sigma --version
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+sigma-validate:
+  extends: .sigma-base
+  stage: validate
+  script:
+    - |
+      echo "=== Sigma rule validation ==="
+      if [ ! -d sigma ]; then
+        echo "No sigma/ directory found — skipping validation."
+        exit 0
+      fi
+
+      # Collect all .yml files under sigma/
+      RULES=$(find sigma/ -name "*.yml" -type f | sort)
+      COUNT=$(echo "$RULES" | wc -l)
+
+      if [ -z "$RULES" ]; then
+        echo "No .yml files found in sigma/ — skipping."
+        exit 0
+      fi
+
+      echo "Found $COUNT rule file(s). Validating..."
+      echo ""
+
+      FAILED=0
+      while IFS= read -r rule; do
+        echo "  Checking: $rule"
+        if ! sigma check "$rule" 2>&1; then
+          echo "  ✗ FAILED: $rule"
+          FAILED=$((FAILED + 1))
+        else
+          echo "  ✓ OK"
+        fi
+      done <<< "$RULES"
+
+      echo ""
+      echo "=== Results: $((COUNT - FAILED))/$COUNT passed ==="
+
+      if [ "$FAILED" -gt 0 ]; then
+        echo "Pipeline failed: $FAILED invalid Sigma rule(s)."
+        exit 1
+      fi
+
+      echo "All Sigma rules are valid."
+  artifacts:
+    when: always
+    reports:
+      # Future: convert sigma check output to JUnit XML for GitLab test reports.
+      # For now, rely on job log output.
+      junit: []
+    paths:
+      - sigma/
+    expire_in: 1 week
+
+# Optional: compile rules to verify they parse correctly against a target backend.
+# Uncomment and set SIGMA_BACKEND to use (e.g. splunk, es-qs, crowdstrike).
+#
+# sigma-compile:
+#   extends: .sigma-base
+#   stage: validate
+#   needs: [sigma-validate]
+#   script:
+#     - |
+#       if [ -z "$SIGMA_BACKEND" ]; then
+#         echo "SIGMA_BACKEND not set — skipping compile check."
+#         exit 0
+#       fi
+#       find sigma/ -name "*.yml" -exec sigma convert -t "$SIGMA_BACKEND" {} \;
+#   variables:
+#     SIGMA_BACKEND: ""
+#   rules:
+#     - if: '$SIGMA_BACKEND != ""'

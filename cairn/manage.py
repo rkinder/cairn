@@ -337,6 +337,74 @@ def init_db_cmd(args: argparse.Namespace) -> None:
     print()
 
 
+def migrate_cmd(args: argparse.Namespace) -> None:
+    """Apply pending SQL migrations to index.db.
+
+    Migration files live in cairn/db/migrations/ and are named NNN_description.sql
+    where NNN is the target schema version (zero-padded, e.g. 001).
+    Migrations are applied in filename order; already-applied ones are skipped
+    by comparing against _schema_meta.schema_version.
+    """
+    migrations_dir = Path(__file__).parent / "db" / "migrations"
+    if not migrations_dir.exists():
+        print("  No migrations directory found — nothing to apply.")
+        return
+
+    conn = _open_index()
+    row = conn.execute(
+        "SELECT value FROM _schema_meta WHERE key = 'schema_version'"
+    ).fetchone()
+    current_version = int(row["value"]) if row else 1
+    conn.close()
+
+    migration_files = sorted(migrations_dir.glob("*.sql"))
+    if not migration_files:
+        print("  No migration files found — nothing to apply.")
+        return
+
+    applied = 0
+    for mf in migration_files:
+        # File name format: NNN_description.sql — NNN is the target version.
+        try:
+            target_version = int(mf.stem.split("_")[0])
+        except ValueError:
+            print(f"  [skip] Cannot parse version from filename: {mf.name}")
+            continue
+
+        if target_version <= current_version:
+            print(f"  [skip] {mf.name} (already at schema_version={current_version})")
+            continue
+
+        print(f"  Applying {mf.name} …")
+        conn = _open_index()
+        try:
+            ddl = mf.read_text(encoding="utf-8")
+            conn.executescript(ddl)
+            conn.commit()
+        except Exception as exc:
+            print(f"  [error] Migration failed: {exc}", file=sys.stderr)
+            conn.close()
+            sys.exit(1)
+        conn.close()
+
+        # Re-read the version written by the migration itself.
+        conn = _open_index()
+        row = conn.execute(
+            "SELECT value FROM _schema_meta WHERE key = 'schema_version'"
+        ).fetchone()
+        current_version = int(row["value"]) if row else current_version
+        conn.close()
+
+        print(f"  ✓  {mf.name} → schema_version={current_version}")
+        applied += 1
+
+    if applied == 0:
+        print(f"  Database is up to date (schema_version={current_version}).")
+    else:
+        print(f"\n  Applied {applied} migration(s). schema_version={current_version}")
+    print()
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -352,6 +420,13 @@ def build_parser() -> argparse.ArgumentParser:
     # -- init-db -------------------------------------------------------------
     p_init = sub.add_parser("init-db", help="Create database files and register topic DBs.")
     p_init.set_defaults(func=init_db_cmd)
+
+    # -- migrate -------------------------------------------------------------
+    p_migrate = sub.add_parser(
+        "migrate",
+        help="Apply pending SQL migrations to index.db (schema version upgrades).",
+    )
+    p_migrate.set_defaults(func=migrate_cmd)
 
     # -- agent ---------------------------------------------------------------
     p_agent = sub.add_parser("agent", help="Manage agents.")
