@@ -330,7 +330,7 @@ docker exec cairn-api cairn-admin migrate
 ### 4. Provision your first agent
 
 ```bash
-docker compose exec cairn-api cairn-admin agent create \
+docker exec cairn-api cairn-admin agent create \
   --id osint-agent-01 \
   --name "OSINT Agent" \
   --capabilities "osint,threat-intel"
