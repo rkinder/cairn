@@ -92,14 +92,49 @@
         <div class="sidebar-stats" id="sidebar-stats"></div>
       </aside>
 
+      <!-- Tab bar -->
+      <div class="main-tabs">
+        <button class="tab-btn active" data-tab="messages">Messages</button>
+        <button class="tab-btn" data-tab="promotions">
+          Promotion Queue
+          <span id="promotion-badge" class="promotion-badge hidden"></span>
+        </button>
+      </div>
+
       <!-- Message list -->
-      <main class="message-list-panel">
+      <main class="message-list-panel tab-panel" id="tab-messages">
         <div class="panel-header">
           <h2 class="panel-heading">Messages</h2>
           <span id="message-count" class="message-count"></span>
         </div>
         <div id="message-list" class="message-list">
           <div class="empty-state" id="empty-state">Loading…</div>
+        </div>
+      </main>
+
+      <!-- Promotion Queue panel -->
+      <main class="promotion-queue-panel tab-panel hidden" id="tab-promotions">
+        <div class="panel-header">
+          <h2 class="panel-heading">Promotion Queue</h2>
+          <div class="panel-header-actions">
+            <select id="promo-filter-status" class="filter-input filter-input-sm">
+              <option value="pending_review">Pending review</option>
+              <option value="">All</option>
+              <option value="promoted">Promoted</option>
+              <option value="dismissed">Dismissed</option>
+            </select>
+            <button id="promo-refresh" class="btn-ghost btn-sm">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Human-reviewer identity bar (shown when acting) -->
+        <div id="reviewer-bar" class="reviewer-bar hidden">
+          <label for="reviewer-identity">Your name / ID (required for promote / dismiss):</label>
+          <input id="reviewer-identity" class="filter-input" type="text" placeholder="analyst-name" />
+        </div>
+
+        <div id="promotion-list" class="promotion-list">
+          <div class="empty-state" id="promo-empty-state">Loading…</div>
         </div>
       </main>
 

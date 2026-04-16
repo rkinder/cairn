@@ -200,8 +200,19 @@ html, body {
 .layout {
   display: grid;
   grid-template-columns: 220px 1fr 380px;
+  grid-template-rows: auto 1fr;
   flex: 1;
   overflow: hidden;
+}
+
+/* Sidebar spans both rows */
+.sidebar {
+  grid-row: 1 / span 2;
+}
+
+/* Tab panels are in the second row */
+.tab-panel {
+  grid-row: 2;
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────────────────── */
@@ -645,3 +656,247 @@ select.filter-input {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── Tab bar ──────────────────────────────────────────────────────────────── */
+.main-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+  padding: 0 1rem;
+  flex-shrink: 0;
+  /* spans across middle + right columns in the grid */
+  grid-column: 2 / span 2;
+}
+
+.tab-btn {
+  position: relative;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: .82rem;
+  font-weight: 500;
+  padding: .65rem .9rem;
+  transition: color .15s, border-color .15s;
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── Promotion badge ──────────────────────────────────────────────────────── */
+.promotion-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--promote-candidate);
+  color: #000;
+  border-radius: 999px;
+  font-size: .68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Promotion queue panel ────────────────────────────────────────────────── */
+.promotion-queue-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-left: auto;
+}
+
+.filter-input-sm {
+  width: auto;
+  padding: .3rem .6rem;
+  font-size: .78rem;
+}
+
+.btn-sm {
+  padding: .3rem .65rem;
+  font-size: .78rem;
+}
+
+.reviewer-bar {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .5rem 1rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: .78rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.reviewer-bar label { white-space: nowrap; }
+.reviewer-bar .filter-input { flex: 1; max-width: 260px; padding: .3rem .6rem; font-size: .78rem; }
+
+.promotion-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: .75rem;
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+/* ── Promotion candidate card ─────────────────────────────────────────────── */
+.promo-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color .15s;
+}
+
+.promo-card:hover { border-color: var(--border-focus); }
+
+.promo-card.status-promoted  { border-left: 3px solid var(--promote-promoted); }
+.promo-card.status-dismissed { border-left: 3px solid var(--promote-rejected); opacity: .7; }
+.promo-card.status-pending_review { border-left: 3px solid var(--promote-candidate); }
+
+.promo-card-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .6rem .75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.promo-entity {
+  font-weight: 600;
+  font-size: .88rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promo-trigger {
+  font-size: .72rem;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .15rem .4rem;
+  white-space: nowrap;
+}
+
+.promo-chevron {
+  color: var(--text-muted);
+  font-size: .75rem;
+  transition: transform .15s;
+}
+.promo-card.expanded .promo-chevron { transform: rotate(180deg); }
+
+.promo-card-body {
+  border-top: 1px solid var(--border);
+  padding: .75rem;
+  display: none;
+  flex-direction: column;
+  gap: .6rem;
+}
+.promo-card.expanded .promo-card-body { display: flex; }
+
+.promo-meta {
+  font-size: .75rem;
+  color: var(--text-muted);
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.promo-narrative-label {
+  font-size: .75rem;
+  color: var(--text-dim);
+  margin-bottom: .25rem;
+}
+
+.promo-narrative {
+  width: 100%;
+  min-height: 80px;
+  padding: .5rem .65rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: .82rem;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  transition: border-color .15s;
+}
+.promo-narrative:focus { border-color: var(--border-focus); }
+.promo-narrative[readonly] { opacity: .7; cursor: default; }
+
+.promo-sources {
+  font-size: .75rem;
+  color: var(--text-muted);
+}
+
+.promo-sources span {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .72rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .1rem .35rem;
+  margin-right: .25rem;
+  display: inline-block;
+}
+
+.promo-actions {
+  display: flex;
+  gap: .5rem;
+  margin-top: .25rem;
+}
+
+.btn-promote {
+  padding: .4rem .9rem;
+  background: var(--promote-promoted);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #000;
+  font-size: .8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.btn-promote:hover { opacity: .85; }
+.btn-promote:disabled { opacity: .4; cursor: not-allowed; }
+
+.btn-dismiss {
+  padding: .4rem .9rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: .8rem;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.btn-dismiss:hover { border-color: var(--text-muted); color: var(--text); }
+.btn-dismiss:disabled { opacity: .4; cursor: not-allowed; }
+
+.promo-vault-link {
+  font-size: .75rem;
+  color: var(--promote-promoted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
