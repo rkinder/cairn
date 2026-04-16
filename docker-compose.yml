@@ -116,6 +116,13 @@ services:
     environment:
       GITLAB_OMNIBUS_CONFIG: |
         external_url 'http://localhost:8080'
+        # nginx must listen on port 80 so Docker's 8080:80 mapping works.
+        # Without this, Omnibus derives port 8080 from external_url and gives
+        # both nginx AND puma a bind on 8080 — nginx wins, puma crash-loops.
+        nginx['listen_port'] = 80
+        # Puma only needs the unix socket; nginx proxies through it. Give puma
+        # an unused TCP port so it doesn't try to bind nginx's port.
+        puma['port'] = 9292
         gitlab_rails['gitlab_shell_ssh_port'] = 2222
         # Reduce memory usage for development.
         puma['worker_processes'] = 2
@@ -125,7 +132,7 @@ services:
     shm_size: "256m"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/-/health"]
+      test: ["CMD", "curl", "-f", "http://localhost/-/health"]
       interval: 60s
       timeout: 10s
       retries: 10
