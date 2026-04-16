@@ -64,6 +64,61 @@ class Settings(BaseSettings):
         description="Interval between SSE keepalive comments to prevent proxy timeouts.",
     )
 
+    # ---------------------------------------------------------------------------
+    # GitLab integration (Phase 3)
+    # ---------------------------------------------------------------------------
+    # Abstract the base URL so self-hosted GitLab CE and gitlab.com are both
+    # supported with zero code changes — only this env var differs.
+
+    gitlab_url: str = Field(
+        default="http://gitlab",
+        description=(
+            "Base URL of the GitLab instance. "
+            "Self-hosted example: http://gitlab.local  "
+            "Cloud example: https://gitlab.com"
+        ),
+    )
+    gitlab_token: str = Field(
+        default="",
+        description="GitLab personal access token or project access token with read_repository scope.",
+    )
+    gitlab_project_id: str = Field(
+        default="",
+        description=(
+            "GitLab project ID (numeric, e.g. '42') or namespaced path "
+            "(e.g. 'security-team/methodologies').  Both are accepted by the API."
+        ),
+    )
+    gitlab_methodology_dir: str = Field(
+        default="methodologies",
+        description="Directory in the GitLab repo that contains methodology .yml files.",
+    )
+    gitlab_webhook_secret: str = Field(
+        default="",
+        description=(
+            "Secret token configured in GitLab project webhook settings. "
+            "If set, every incoming webhook is verified against the X-Gitlab-Token header. "
+            "Leave empty to disable verification (dev only)."
+        ),
+    )
+
+    # ---------------------------------------------------------------------------
+    # ChromaDB integration (Phase 3)
+    # ---------------------------------------------------------------------------
+
+    chroma_host: str = Field(
+        default="chromadb",
+        description="Hostname of the ChromaDB HTTP server (Docker service name in Compose).",
+    )
+    chroma_port: int = Field(
+        default=8000,
+        description="Port of the ChromaDB HTTP server.",
+    )
+    chroma_collection: str = Field(
+        default="methodologies",
+        description="ChromaDB collection name for methodology semantic search.",
+    )
+
     @field_validator("data_dir", mode="before")
     @classmethod
     def resolve_data_dir(cls, v: str | Path) -> Path:

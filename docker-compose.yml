@@ -1,0 +1,138 @@
+version: "3.9"
+
+# Cairn Phase 3 stack
+#
+# Services:
+#   cairn-api  — FastAPI blackboard server (port 8000)
+#   chromadb   — ChromaDB vector store for methodology semantic search (host port 8001)
+#   gitlab     — GitLab CE for methodology version control (host port 8080 / 2222)
+#
+# Volumes:
+#   cairn_data   — SQLite databases (shared between cairn-api)
+#   chroma_data  — ChromaDB persistence
+#   gitlab_*     — GitLab configuration, logs, and data
+#
+# Quick start:
+#   cp .env.example .env          # fill in CAIRN_GITLAB_TOKEN, CAIRN_GITLAB_PROJECT_ID
+#   docker compose up -d
+#   docker compose exec cairn-api cairn-admin init-db
+#   docker compose exec cairn-api cairn-admin agent create --id my-agent --name "My Agent"
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Cairn blackboard API
+  # ---------------------------------------------------------------------------
+  cairn-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cairn-api:latest
+    container_name: cairn-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - cairn_data:/data
+    environment:
+      CAIRN_DATA_DIR: /data
+      CAIRN_HOST: 0.0.0.0
+      CAIRN_PORT: "8000"
+      CAIRN_RELOAD: "false"
+      # GitLab integration — set these in .env or override here.
+      CAIRN_GITLAB_URL: http://gitlab
+      CAIRN_GITLAB_TOKEN: ${CAIRN_GITLAB_TOKEN:-}
+      CAIRN_GITLAB_PROJECT_ID: ${CAIRN_GITLAB_PROJECT_ID:-}
+      CAIRN_GITLAB_METHODOLOGY_DIR: ${CAIRN_GITLAB_METHODOLOGY_DIR:-methodologies}
+      CAIRN_GITLAB_WEBHOOK_SECRET: ${CAIRN_GITLAB_WEBHOOK_SECRET:-}
+      # ChromaDB — cairn-api connects to chromadb container on its internal port.
+      CAIRN_CHROMA_HOST: chromadb
+      CAIRN_CHROMA_PORT: "8000"
+      CAIRN_CHROMA_COLLECTION: ${CAIRN_CHROMA_COLLECTION:-methodologies}
+      # Security
+      CAIRN_SECRET_KEY: ${CAIRN_SECRET_KEY:-change-me-in-production}
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # ChromaDB — vector store for methodology semantic discovery
+  # ---------------------------------------------------------------------------
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: cairn-chromadb
+    # Host port 8001 to avoid conflict with cairn-api on 8000.
+    # Internal containers connect on port 8000 (ChromaDB default).
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      # Persist data to the mounted volume.
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /chroma/chroma
+      ANONYMIZED_TELEMETRY: "FALSE"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/heartbeat')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # GitLab CE — methodology version control
+  # ---------------------------------------------------------------------------
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: cairn-gitlab
+    hostname: gitlab
+    # HTTP on 8080, HTTPS on 8443, SSH on 2222 (host side).
+    # The cairn-api container reaches GitLab on http://gitlab:80 (internal).
+    ports:
+      - "8080:80"
+      - "8443:443"
+      - "2222:22"
+    volumes:
+      - gitlab_config:/etc/gitlab
+      - gitlab_logs:/var/log/gitlab
+      - gitlab_data:/var/opt/gitlab
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8080'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2222
+        # Reduce memory usage for development.
+        puma['worker_processes'] = 2
+        sidekiq['concurrency'] = 5
+        prometheus_monitoring['enable'] = false
+    # GitLab CE takes 2–5 minutes to start on first boot.
+    shm_size: "256m"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/-/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+
+
+# ---------------------------------------------------------------------------
+# Named volumes
+# ---------------------------------------------------------------------------
+volumes:
+  cairn_data:
+    driver: local
+  chroma_data:
+    driver: local
+  gitlab_config:
+    driver: local
+  gitlab_logs:
+    driver: local
+  gitlab_data:
+    driver: local

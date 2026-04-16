@@ -115,6 +115,32 @@ class PromoteResult:
     updated_at: str
 
 
+@dataclasses.dataclass
+class MethodologyRef:
+    """Lightweight reference returned by find_methodology().
+
+    Full methodology text is never embedded here — use gitlab_path + sha
+    to fetch content from GitLab when you decide to execute the methodology.
+    """
+    path:  str          # relative path in the GitLab repo
+    sha:   str          # commit SHA at which this methodology was indexed
+    title: str          # Sigma rule title
+    tags:  list[str]    # Sigma rule tags
+    score: float        # similarity score [0, 1]; higher = more relevant
+
+
+@dataclasses.dataclass
+class ExecutionRecord:
+    """Methodology execution record returned by record_execution()."""
+    id:             str
+    methodology_id: str
+    gitlab_path:    str
+    commit_sha:     str
+    status:         str
+    agent_id:       str
+    created_at:     str
+
+
 # ---------------------------------------------------------------------------
 # BlackboardClient
 # ---------------------------------------------------------------------------
@@ -363,6 +389,92 @@ class BlackboardClient:
             promote=data["promote"],
             confidence=data.get("confidence"),
             updated_at=data["updated_at"],
+        )
+
+    # ------------------------------------------------------------------
+    # Methodology discovery (Phase 3)
+    # ------------------------------------------------------------------
+
+    async def find_methodology(
+        self,
+        query: str,
+        n: int = 5,
+    ) -> list[MethodologyRef]:
+        """Semantic methodology search via the ChromaDB-backed endpoint.
+
+        Returns ranked MethodologyRef objects — path, sha, title, tags, and a
+        similarity score.  Full methodology text is NOT returned; call the
+        GitLab API with the returned path + sha when you decide to execute.
+
+        This should be called at the start of an investigation, before
+        attempting to derive methodology from scratch.
+
+        Args:
+            query: Natural-language description of the investigation need.
+            n:     Maximum number of results to return (default 5).
+
+        Returns:
+            List of MethodologyRef dataclasses ordered by descending score.
+        """
+        _, url = self._spec.resolve_url("search_methodologies")
+        response = await self._request("GET", url, params={"q": query, "n": n})
+        return [
+            MethodologyRef(
+                path=item["gitlab_path"],
+                sha=item["commit_sha"],
+                title=item.get("title", ""),
+                tags=item.get("tags", []),
+                score=item["score"],
+            )
+            for item in response.json()
+        ]
+
+    async def record_execution(
+        self,
+        *,
+        methodology_id: str,
+        gitlab_path: str,
+        commit_sha: str,
+        parent_version: str | None = None,
+        result_message_ids: list[str] | None = None,
+    ) -> ExecutionRecord:
+        """Record that this agent ran a methodology from the GitLab repo.
+
+        Creates a methodology_execution record in the blackboard with
+        status='proposed'.  The record can then progress through the review
+        state machine (peer_reviewed → validated) via analyst action.
+
+        Args:
+            methodology_id:     Logical ID from the Sigma 'name' field.
+            gitlab_path:        Path to the .yml file in the GitLab repo.
+            commit_sha:         Exact commit SHA that was executed.
+            parent_version:     Optional SHA of the superseded methodology version.
+            result_message_ids: Blackboard message IDs produced by this run.
+
+        Returns:
+            ExecutionRecord with the server-assigned UUID and created_at timestamp.
+        """
+        _, url = self._spec.resolve_url("create_methodology_execution")
+        payload: dict[str, Any] = {
+            "methodology_id": methodology_id,
+            "gitlab_path":    gitlab_path,
+            "commit_sha":     commit_sha,
+        }
+        if parent_version is not None:
+            payload["parent_version"] = parent_version
+        if result_message_ids is not None:
+            payload["result_message_ids"] = result_message_ids
+
+        response = await self._request("POST", url, json=payload)
+        data = response.json()
+        return ExecutionRecord(
+            id=data["id"],
+            methodology_id=data["methodology_id"],
+            gitlab_path=data["gitlab_path"],
+            commit_sha=data["commit_sha"],
+            status=data["status"],
+            agent_id=data["agent_id"],
+            created_at=data["created_at"],
         )
 
     # ------------------------------------------------------------------
