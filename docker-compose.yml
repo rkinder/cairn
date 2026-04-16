@@ -48,12 +48,15 @@ services:
       CAIRN_HOST: 0.0.0.0
       CAIRN_PORT: "8000"
       CAIRN_RELOAD: "false"
-      # GitLab integration — set these in .env or override here.
-      CAIRN_GITLAB_URL: http://gitlab
-      CAIRN_GITLAB_TOKEN: ${CAIRN_GITLAB_TOKEN:-}
-      CAIRN_GITLAB_PROJECT_ID: ${CAIRN_GITLAB_PROJECT_ID:-}
+      # GitLab integration — set all of these in .env.
+      # Note: CAIRN_GITLAB_URL must be the internal Docker service URL
+      # (http://gitlab), not localhost:8080. The 8080:80 port mapping is
+      # host-side only; inside the network nginx listens on port 80.
+      CAIRN_GITLAB_URL: ${CAIRN_GITLAB_URL}
+      CAIRN_GITLAB_TOKEN: ${CAIRN_GITLAB_TOKEN}
+      CAIRN_GITLAB_PROJECT_ID: ${CAIRN_GITLAB_PROJECT_ID}
       CAIRN_GITLAB_METHODOLOGY_DIR: ${CAIRN_GITLAB_METHODOLOGY_DIR:-methodologies}
-      CAIRN_GITLAB_WEBHOOK_SECRET: ${CAIRN_GITLAB_WEBHOOK_SECRET:-}
+      CAIRN_GITLAB_WEBHOOK_SECRET: ${CAIRN_GITLAB_WEBHOOK_SECRET}
       # ChromaDB — cairn-api connects to chromadb container on its internal port.
       CAIRN_CHROMA_HOST: chromadb
       CAIRN_CHROMA_PORT: "8000"
