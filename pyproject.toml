@@ -45,6 +45,15 @@ cairn-admin = "cairn.manage:main"
 where = ["."]
 include = ["cairn*"]
 
+[tool.setuptools.package-data]
+cairn = [
+    "db/migrations/*.sql",
+    "db/schema/*.sql",
+    "ui/*.html",
+    "ui/*.css",
+    "ui/*.js",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
