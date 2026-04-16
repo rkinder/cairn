@@ -65,7 +65,7 @@ services:
       CAIRN_CORROBORATION_WINDOW_HOURS: ${CAIRN_CORROBORATION_WINDOW_HOURS:-24}
       CAIRN_PROMOTION_CONFIDENCE_THRESHOLD: ${CAIRN_PROMOTION_CONFIDENCE_THRESHOLD:-0.7}
       # Security
-      CAIRN_SECRET_KEY: ${CAIRN_SECRET_KEY:-change-me-in-production}
+      CAIRN_SECRET_KEY: ${CAIRN_SECRET_KEY}
     depends_on:
       chromadb:
         condition: service_started
@@ -160,8 +160,8 @@ services:
     volumes:
       - couchdb_data:/opt/couchdb/data
     environment:
-      COUCHDB_USER: ${COUCHDB_USER:-cairn}
-      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:-change-me-in-production}
+      COUCHDB_USER: ${COUCHDB_USER}
+      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5984/"]
