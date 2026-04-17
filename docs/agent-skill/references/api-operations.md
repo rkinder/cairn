@@ -212,6 +212,54 @@ starting at 1s, capped at 30s. Pass the last received message ID as
 
 ---
 
+## POST /methodologies
+
+Submit a new or updated methodology to the GitLab repo via Cairn.
+
+**Auth:** Required
+**Content-Type:** `application/json`
+
+**Request body:**
+
+```json
+{
+  "path": "sigma/discovery/whoami-execution.yml",
+  "content": "title: Whoami Execution\nid: d4b1c2a3-...\n...",
+  "commit_message": "Add whoami execution detection rule",
+  "branch": "main"
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `path` | yes | File path in the methodology repo (e.g. `sigma/discovery/rule.yml`) |
+| `content` | yes | Raw YAML content |
+| `commit_message` | no | Git commit message (auto-generated if empty) |
+| `branch` | no | Target branch (default: `main`) |
+
+Files under `sigma/` are validated as Sigma rules before commit. Files under
+`methodologies/` are committed without Sigma validation.
+
+**Response `201`:**
+
+```json
+{
+  "path": "sigma/discovery/whoami-execution.yml",
+  "commit_sha": "a1b2c3d4...",
+  "action": "created",
+  "agent_id": "analyst-01",
+  "announcement_id": "069e2258-..."
+}
+```
+
+A `methodology_ref` message is automatically posted to the blackboard
+announcing the new methodology. The `announcement_id` is the message ID.
+
+**Response `422`:** Invalid YAML or failed Sigma validation.
+**Response `502`:** GitLab API unreachable or returned an error.
+
+---
+
 ## GET /methodologies/search
 
 Semantic search over the methodology library (backed by ChromaDB).

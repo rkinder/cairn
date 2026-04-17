@@ -138,6 +138,62 @@ class GitLabClient:
         data = response.json()
         return base64.b64decode(data["content"]).decode("utf-8")
 
+    async def create_or_update_file(
+        self,
+        file_path: str,
+        content: str,
+        commit_message: str,
+        branch: str = "main",
+        author_name: str = "Cairn",
+        author_email: str = "cairn@noreply",
+    ) -> dict:
+        """Create or update a file in the GitLab repository.
+
+        Checks whether the file exists first, then uses the appropriate
+        GitLab API endpoint (create vs update).
+
+        Returns a dict with 'file_path', 'branch', and 'commit_id' (the SHA).
+        """
+        encoded_path = quote(file_path, safe="")
+        payload = {
+            "branch": branch,
+            "content": content,
+            "commit_message": commit_message,
+            "author_name": author_name,
+            "author_email": author_email,
+        }
+
+        # Check if file exists to decide create vs update.
+        head = await self._http.head(
+            f"/projects/{self._project_id}/repository/files/{encoded_path}",
+            params={"ref": branch},
+        )
+        if head.status_code == 200:
+            resp = await self._http.put(
+                f"/projects/{self._project_id}/repository/files/{encoded_path}",
+                json=payload,
+            )
+        else:
+            resp = await self._http.post(
+                f"/projects/{self._project_id}/repository/files/{encoded_path}",
+                json=payload,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "file_path": data.get("file_path", file_path),
+            "branch": data.get("branch", branch),
+            "commit_id": data.get("content_sha256", ""),  # GitLab returns content hash
+        }
+
+    async def get_latest_commit_sha(self, branch: str = "main") -> str:
+        """Get the latest commit SHA on a branch."""
+        resp = await self._http.get(
+            f"/projects/{self._project_id}/repository/branches/{quote(branch, safe='')}",
+        )
+        resp.raise_for_status()
+        return resp.json()["commit"]["id"]
+
     async def fetch_methodology(self, file_path: str, sha: str) -> MethodologyFile:
         """Fetch a methodology file and extract its Sigma YAML metadata.
 
