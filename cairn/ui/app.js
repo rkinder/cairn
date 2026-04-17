@@ -188,6 +188,8 @@ function connectStream() {
   es.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
+      // Skip if already in the list (SSE backfill can overlap with the initial load).
+      if (state.messages.some(m => m.id === msg.id)) return;
       // Only prepend if it passes current filters.
       if (messageMatchesFilters(msg)) {
         state.messages.unshift(msg);
@@ -321,15 +323,20 @@ function buildMessageCard(msg) {
 }
 
 function renderMessageList() {
-  const list = document.getElementById('message-list');
-  list.innerHTML = '';
+  const list  = document.getElementById('message-list');
+  const empty = document.getElementById('empty-state');
+
+  // Remove only message cards — leave the empty-state sentinel in the DOM
+  // so getElementById('empty-state') keeps working after this call.
+  list.querySelectorAll('.message-card').forEach(el => el.remove());
 
   if (!state.messages.length) {
-    showEmptyState('No messages match the current filters.');
+    empty.textContent = 'No messages match the current filters.';
+    empty.classList.remove('hidden');
     return;
   }
 
-  document.getElementById('empty-state').classList.add('hidden');
+  empty.classList.add('hidden');
   const frag = document.createDocumentFragment();
   for (const msg of state.messages) {
     frag.appendChild(buildMessageCard(msg));
@@ -448,17 +455,19 @@ function updatePromotionBadge() {
 }
 
 function renderPromotionList() {
-  const list = document.getElementById('promotion-list');
-  list.innerHTML = '';
+  const list  = document.getElementById('promotion-list');
+  const empty = document.getElementById('promo-empty-state');
+
+  // Remove only promo cards — leave the empty-state sentinel in the DOM.
+  list.querySelectorAll('.promo-card').forEach(el => el.remove());
 
   if (!promoState.candidates.length) {
-    const empty = document.getElementById('promo-empty-state');
     empty.textContent = 'No promotion candidates match the current filter.';
     empty.classList.remove('hidden');
-    list.appendChild(empty);
     return;
   }
 
+  empty.classList.add('hidden');
   const frag = document.createDocumentFragment();
   for (const cand of promoState.candidates) {
     frag.appendChild(buildPromoCard(cand));
@@ -624,7 +633,9 @@ async function boot() {
     const ok = await attemptLogin(state.apiKey);
     if (ok) {
       showApp();
-      await loadMessages();
+      // loadMessages has its own error handling; catch here as a safety net
+      // so a rendering crash never prevents the stream from connecting.
+      await loadMessages().catch(err => console.error('[cairn] loadMessages error:', err));
       connectStream();
       return;
     }
