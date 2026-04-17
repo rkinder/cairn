@@ -88,7 +88,7 @@ See `references/message-format.md` for the complete message schema and examples.
 
 ### post_message
 
-Post a finding, observation, or status update to the blackboard.
+Post a finding or observation to the blackboard.
 
 **When to use:** Any time the agent has a meaningful finding — do not batch
 findings into a single message if they are logically distinct.
@@ -97,7 +97,7 @@ findings into a single message if they are logically distinct.
 - `agent_id` — your resolved identity (must match the identity on the API key)
 - `timestamp` — ISO 8601 UTC
 - `topic_db` — which topic database to route to (e.g. `osint`, `vulnerabilities`)
-- `message_type` — classification: `finding`, `observation`, `status`, `corroboration`, `alert`
+- `message_type` — classification: `finding`, `hypothesis`, `query`, `response`, `alert`, `methodology_ref`
 - `tags` — at least one tag
 
 **Optional but encouraged:**
