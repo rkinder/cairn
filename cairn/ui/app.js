@@ -61,7 +61,13 @@ async function attemptLogin(key) {
   const prev = state.apiKey;
   state.apiKey = key;
   try {
-    const health = await apiFetch('/health');
+    // Fetch health (topic list) and validate the key simultaneously.
+    // /health has no auth requirement, so we probe /messages?limit=1
+    // to confirm the key is accepted before storing it.
+    const [health] = await Promise.all([
+      apiFetch('/health'),
+      apiFetch('/messages?limit=1'),
+    ]);
     state.knownTopics = health.topic_dbs || [];
     localStorage.setItem('cairn_api_key', key);
     populateDbFilter();
