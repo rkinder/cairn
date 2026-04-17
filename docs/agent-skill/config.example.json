@@ -1,0 +1,6 @@
+{
+  "base_url": "http://localhost:8000",
+  "api_key":  "cairn_<your-agent-api-key>",
+  "agent_id": "<your-agent-id>",
+  "spec_cache_ttl_seconds": 3600
+}
