@@ -43,10 +43,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from cairn.api.deps import authenticated_agent, get_db_manager
+from cairn.api.deps import authenticated_agent, get_broadcaster, get_db_manager
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
 from cairn.db.ids import new_id
+from cairn.api.broadcast import MessageBroadcaster
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/methodologies", tags=["methodologies"])
@@ -93,6 +94,21 @@ class MethodologySearchResult(BaseModel):
     score:       float = Field(..., ge=0.0, le=1.0, description="Similarity score [0, 1].")
 
 
+class SubmitMethodologyRequest(BaseModel):
+    path: str = Field(..., description="File path within the methodology repo (e.g. sigma/discovery/rule.yml)")
+    content: str = Field(..., description="Raw YAML content of the methodology file")
+    commit_message: str = Field("", description="Git commit message. Auto-generated if empty.")
+    branch: str = Field("main", description="Target branch in the methodology repo.")
+
+
+class SubmitMethodologyResponse(BaseModel):
+    path: str
+    commit_sha: str
+    action: str
+    agent_id: str
+    announcement_id: str | None = None
+
+
 class CreateExecutionRequest(BaseModel):
     methodology_id:    str   = Field(..., description="Logical ID from the Sigma 'name' field or derived from path.")
     gitlab_path:       str   = Field(..., description="Path to the .yml file within the GitLab repo.")
@@ -124,6 +140,130 @@ class StatusUpdateRequest(BaseModel):
     notes: str = Field(
         default="",
         description="Optional notes explaining this status transition.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /methodologies — submit a new methodology to GitLab
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "",
+    operation_id="submit_methodology",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SubmitMethodologyResponse,
+    summary="Submit a methodology to GitLab",
+    description=(
+        "Validates the submitted YAML as a Sigma rule (if path starts with sigma/), "
+        "commits it to the methodology GitLab repo, and posts a blackboard "
+        "announcement so all agents are notified."
+    ),
+)
+async def submit_methodology(
+    body: SubmitMethodologyRequest,
+    agent: Annotated[dict, Depends(authenticated_agent)],
+    db: Annotated[DatabaseManager, Depends(get_db_manager)],
+    broadcaster: Annotated[MessageBroadcaster, Depends(get_broadcaster)],
+) -> SubmitMethodologyResponse:
+    from cairn.ingest.sigma import SigmaValidationError, validate_sigma_rule
+    from cairn.integrations.gitlab import GitLabClient
+    from cairn.ingest.parser import parse_message
+    from cairn.ingest.writer import write_message
+
+    # Validate Sigma rules under sigma/ path.
+    sigma_meta = None
+    if body.path.startswith("sigma/"):
+        try:
+            sigma_meta = validate_sigma_rule(body.content)
+        except SigmaValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Sigma validation failed: {'; '.join(exc.errors)}",
+            ) from exc
+
+    # Commit to GitLab.
+    commit_msg = body.commit_message or f"Add {body.path} via Cairn API (agent: {agent['id']})"
+    author_name = agent.get("display_name", agent["id"])
+
+    try:
+        async with GitLabClient.from_settings() as gl:
+            result = await gl.create_or_update_file(
+                file_path=body.path,
+                content=body.content,
+                commit_message=commit_msg,
+                branch=body.branch,
+                author_name=f"{author_name} via Cairn",
+                author_email="cairn@noreply",
+            )
+            commit_sha = await gl.get_latest_commit_sha(body.branch)
+    except Exception as exc:
+        logger.exception("GitLab commit failed for %s", body.path)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"GitLab commit failed: {exc}",
+        ) from exc
+
+    # Determine action.
+    action = "updated" if result.get("action") == "updated" else "created"
+
+    # Post blackboard announcement.
+    announcement_id = None
+    title = sigma_meta.get("title", body.path) if sigma_meta else body.path
+    description = sigma_meta.get("description", "") if sigma_meta else ""
+    rule_tags = sigma_meta.get("tags", []) if sigma_meta else []
+    rule_status = sigma_meta.get("status", "experimental") if sigma_meta else "experimental"
+
+    now = datetime.now(tz=timezone.utc).isoformat()
+    tags_str = ", ".join(["methodology"] + rule_tags)
+    raw_content = (
+        f"---\n"
+        f"agent_id: {agent['id']}\n"
+        f"timestamp: {now}\n"
+        f"message_type: methodology_ref\n"
+        f"tags: [{tags_str}]\n"
+        f"confidence: 1.0\n"
+        f"methodology_sha: {commit_sha}\n"
+        f"---\n\n"
+        f"New methodology {action}: **{title}**\n\n"
+        f"Path: `{body.path}`\n"
+        f"Status: {rule_status}\n"
+        f"Author: {agent['id']}\n"
+    )
+    if description:
+        raw_content += f"\n{description}\n"
+
+    try:
+        msg_id = new_id()
+        record = parse_message(raw_content, msg_id)
+        # Post to first available topic DB (osint as default).
+        topic = "osint"
+        await write_message(record, topic, db)
+        await broadcaster.broadcast({
+            "id":           record.id,
+            "topic_db":     topic,
+            "agent_id":     record.agent_id,
+            "thread_id":    record.thread_id,
+            "message_type": record.message_type.value,
+            "tags":         record.tags,
+            "confidence":   record.confidence,
+            "timestamp":    record.timestamp.isoformat(),
+            "ingested_at":  record.ingested_at.isoformat(),
+        })
+        announcement_id = record.id
+    except Exception:
+        logger.exception("Failed to post methodology announcement — commit succeeded")
+
+    logger.info(
+        "Methodology %s committed to GitLab by agent '%s' (sha=%s)",
+        body.path, agent["id"], commit_sha[:8],
+    )
+
+    return SubmitMethodologyResponse(
+        path=body.path,
+        commit_sha=commit_sha,
+        action=action,
+        agent_id=agent["id"],
+        announcement_id=announcement_id,
     )
 
 
