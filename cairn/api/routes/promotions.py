@@ -214,19 +214,20 @@ async def promote_candidate(
             detail=f"Cannot promote a candidate in status '{row['status']}'.",
         )
 
-    settings   = get_settings()
-    entity     = row["entity"]
+    settings    = get_settings()
+    entity      = row["entity"]
     entity_type = row["entity_type"]
-    source_ids = json.loads(row["source_message_ids"] or "[]")
-    narrative  = (body.narrative or row["narrative"] or "").strip()
-    confidence = row["confidence"]
-    now_iso    = _now_iso()
+    entity_domain = row["entity_domain"]          # Phase 4.2: IT domain hint or None
+    source_ids  = json.loads(row["source_message_ids"] or "[]")
+    narrative   = (body.narrative or row["narrative"] or "").strip()
+    confidence  = row["confidence"]
+    now_iso     = _now_iso()
 
     # Resolve related wikilinks from the entity itself
     resolver      = _get_resolver()
     related_links = _build_related_links(entity, entity_type, source_ids, resolver)
 
-    # Write to vault
+    # Write to vault (Phase 4.2: pass domain for domain-aware subdirectory routing)
     try:
         vault_rel = write_note(
             settings.vault_path,
@@ -237,6 +238,7 @@ async def promote_candidate(
             confidence=confidence,
             promoted_at=now_iso,
             related_links=related_links,
+            domain=entity_domain,
         )
     except Exception as exc:
         logger.exception("promote_candidate: vault write failed for %s", candidate_id)
