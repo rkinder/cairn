@@ -85,6 +85,8 @@ do not retry with the same key.
 
 See `references/api-operations.md` for full HTTP details on each endpoint.
 See `references/message-format.md` for the complete message schema and examples.
+See `references/promotion-pipeline.md` for how findings become vault notes —
+what triggers a candidate, when to set `promote: true`, and the full state machine.
 
 ### post_message
 
