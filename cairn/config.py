@@ -119,6 +119,50 @@ class Settings(BaseSettings):
         description="ChromaDB collection name for methodology semantic search.",
     )
 
+    # ---------------------------------------------------------------------------
+    # Obsidian vault bridge (Phase 4)
+    # ---------------------------------------------------------------------------
+
+    vault_path: Path = Field(
+        default=Path("/vault"),
+        description=(
+            "Absolute path to the Obsidian vault directory. "
+            "Must be pre-initialised by Obsidian (.obsidian/ folder must exist). "
+            "In Docker Compose this is bind-mounted into the container at the same path."
+        ),
+    )
+    vault_collection: str = Field(
+        default="vault-notes",
+        description="ChromaDB collection name for promoted vault notes (separate from methodologies).",
+    )
+
+    # ---------------------------------------------------------------------------
+    # Corroboration detection (Phase 4)
+    # ---------------------------------------------------------------------------
+
+    corroboration_n: int = Field(
+        default=2,
+        ge=1,
+        description=(
+            "Minimum number of distinct agents that must mention the same entity "
+            "within the time window to trigger an automatic promotion candidate."
+        ),
+    )
+    corroboration_window_hours: int = Field(
+        default=24,
+        ge=1,
+        description="Time window in hours within which corroboration is detected.",
+    )
+    promotion_confidence_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum confidence score for an agent self-nomination (promote: candidate) "
+            "to create a promotion candidate without human intervention."
+        ),
+    )
+
     @field_validator("data_dir", mode="before")
     @classmethod
     def resolve_data_dir(cls, v: str | Path) -> Path:
