@@ -169,13 +169,35 @@ Methodology versioning uses explicit parent references (`parent_version` field) 
 ### Phase 4 — Obsidian Vault Bridge
 *Promotion pipeline from SQLite into curated knowledge.*
 
-- [ ] Corroboration detection job: identify messages referencing same entity from N agents
-- [ ] Human promotion UI: review queue, one-click promote, narrative edit before write
-- [ ] Entity extractor: parse markdown body for hostnames, IPs, CVEs, actor names
-- [ ] Wikilink resolver: check vault for existing note, generate link or create stub
-- [ ] Vault writer: produce properly structured markdown note with frontmatter, wikilinks, source attribution
-- [ ] Deduplication: append/update existing notes rather than creating duplicates
+- [x] Corroboration detection job: identify messages referencing same entity from N agents
+- [x] Human promotion UI: review queue, one-click promote, narrative edit before write
+- [x] Entity extractor: parse markdown body for hostnames, IPs, CVEs, actor names
+- [x] Wikilink resolver: check vault for existing note, generate link or create stub
+- [x] Vault writer: produce properly structured markdown note with frontmatter, wikilinks, source attribution
+- [x] Deduplication: append/update existing notes rather than creating duplicates
 - [ ] GitLab webhook → ChromaDB sync (also needed here for vault-level methodology links)
+
+### Phase 4.2 — IT Domain Expansion
+*Five new topic databases, IT entity patterns, domain-aware vault routing, playbook support.*
+
+- [x] `cairn/db/schema/topic_common.sql` — shared messages table DDL for all new topic DBs
+- [x] Five new topic databases registered: `aws`, `azure`, `networking`, `systems`, `pam`
+- [x] `init.py` extended: `SCHEMA_FILES` + `_TOPIC_METADATA` + `_schema_meta` injection
+- [x] `Entity.domain` field added (backward-compatible optional field)
+- [x] AWS entity patterns: ARN, account ID (context-guarded), region
+- [x] Azure entity patterns: subscription UUID (context-guarded), resource group path
+- [x] Networking entity patterns: validated CIDR, VLAN (case-insensitive)
+- [x] PAM entity patterns: CyberArk Safe from body and tags
+- [x] Systems FQDN tagging via `topic_db="systems"` parameter on `extract()`
+- [x] `_has_context()` helper for false-positive suppression
+- [x] `promotion_candidates.entity_domain` column — migration `003_add_entity_domain.sql`
+- [x] `write_note()` domain-aware subdirectory routing (`cairn/{domain}/`)
+- [x] `_entity_type_to_tag()` extended with 8 IT domain entity types
+- [x] Corroboration job passes `topic_db` to `extract()` and persists `entity_domain`
+- [x] Promotions route passes `domain` to `write_note()`
+- [x] `.env.example` documents `CAIRN_GITLAB_METHODOLOGY_DIR=.` for playbook sync
+- [x] Agent skill docs updated with 7 topic DB slugs and `playbooks/{domain}/` paths
+- [x] 134 tests passing; all Phase 4.1 tests green
 
 ### Phase 5 — Scale and Hardening
 *Address the friction points that appear as the team grows.*

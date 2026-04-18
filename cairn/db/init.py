@@ -42,9 +42,15 @@ logger = logging.getLogger(__name__)
 # Maps domain slug → schema filename.
 # Add new topic databases here as they are introduced.
 SCHEMA_FILES: dict[str, str] = {
-    "index": "index.sql",
-    "osint": "osint.sql",
+    "index":           "index.sql",
+    "osint":           "osint.sql",
     "vulnerabilities": "vulnerabilities.sql",
+    # Phase 4.2 — IT domain expansion
+    "aws":             "topic_common.sql",
+    "azure":           "topic_common.sql",
+    "networking":      "topic_common.sql",
+    "systems":         "topic_common.sql",
+    "pam":             "topic_common.sql",
 }
 
 # Human-readable metadata for auto-registration.
@@ -59,6 +65,32 @@ _TOPIC_METADATA: dict[str, dict] = {
         "display_name": "Vulnerabilities",
         "description": "CVEs, affected systems, asset exposure, and remediation tracking.",
         "domain_tags": '["vulnerability", "cve", "remediation"]',
+    },
+    # Phase 4.2 — IT domain expansion
+    "aws": {
+        "display_name": "AWS",
+        "description": "AWS infrastructure, IAM, security, and architecture findings.",
+        "domain_tags": '["aws", "cloud", "iam"]',
+    },
+    "azure": {
+        "display_name": "Azure",
+        "description": "Azure infrastructure, Entra ID, networking, and PIM findings.",
+        "domain_tags": '["azure", "cloud", "entra"]',
+    },
+    "networking": {
+        "display_name": "Networking",
+        "description": "Network infrastructure, firewalls, segmentation, and topology.",
+        "domain_tags": '["network", "firewall", "vlan"]',
+    },
+    "systems": {
+        "display_name": "Systems",
+        "description": "Windows/Linux administration, GPO, patching, and server config.",
+        "domain_tags": '["windows", "linux", "gpo", "patching"]',
+    },
+    "pam": {
+        "display_name": "Privileged Access",
+        "description": "CyberArk, privileged sessions, vault management, and EPM.",
+        "domain_tags": '["cyberark", "pam", "privileged-access"]',
     },
 }
 
@@ -92,6 +124,17 @@ async def init_db(db_path: Path, domain: str) -> None:
             logger.info("Creating %s database at %s", domain, db_path)
             ddl = schema_file.read_text(encoding="utf-8")
             await db.executescript(ddl)
+            # For databases that use topic_common.sql the schema file has no
+            # hard-coded INSERT rows — inject domain-specific metadata here so
+            # every new database carries the correct schema_version and domain.
+            await db.execute(
+                "INSERT OR IGNORE INTO _schema_meta (key, value) VALUES (?, ?)",
+                ("schema_version", "1"),
+            )
+            await db.execute(
+                "INSERT OR IGNORE INTO _schema_meta (key, value) VALUES (?, ?)",
+                ("domain", domain),
+            )
             await db.commit()
         else:
             cursor = await db.execute(

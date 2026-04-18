@@ -109,6 +109,8 @@ async def _detect_corroboration(db: DatabaseManager, settings: Settings) -> None
     # and run entity extraction.  Build: entity → set of (agent_id, msg_id).
     entity_sightings: dict[tuple[str, str], list[tuple[str, str]]] = {}
     # key: (entity_type, entity_value), value: [(agent_id, message_id), ...]
+    entity_domains: dict[tuple[str, str], str | None] = {}
+    # key: (entity_type, entity_value), value: IT domain hint (or None)
 
     # Group messages by topic DB id so we can open each connection once
     topic_db_id_map: dict[str, str] = {}  # topic_db_id → slug
@@ -141,10 +143,13 @@ async def _detect_corroboration(db: DatabaseManager, settings: Settings) -> None
         except Exception:
             tags = []
 
-        entities = extract(body, tags=tags)
+        entities = extract(body, tags=tags, topic_db=slug)
         for entity in entities:
             key = (entity.type, entity.value.lower())
             entity_sightings.setdefault(key, []).append((row["agent_id"], row["id"]))
+            # Track the domain hint for this entity key (first sighting wins)
+            if key not in entity_domains:
+                entity_domains[key] = entity.domain
 
     # Identify entities seen by ≥ N distinct agents
     n_threshold = settings.corroboration_n
@@ -168,6 +173,7 @@ async def _detect_corroboration(db: DatabaseManager, settings: Settings) -> None
             conn,
             entity=canonical_value,
             entity_type=entity_type,
+            entity_domain=entity_domains.get((entity_type, entity_value_lower)),
             trigger="corroboration",
             confidence=None,
             source_message_ids=source_ids,
@@ -265,25 +271,33 @@ async def _create_candidate(
     *,
     entity: str,
     entity_type: str,
+    entity_domain: str | None = None,
     trigger: str,
     confidence: float | None,
     source_message_ids: list[str],
 ) -> None:
-    """Insert a new promotion_candidates row and commit."""
+    """Insert a new promotion_candidates row and commit.
+
+    Args:
+        entity_domain: IT domain hint from the entity extractor (Phase 4.2).
+                       None for cybersecurity entities; 'aws' | 'azure' |
+                       'networking' | 'systems' | 'pam' for IT entities.
+    """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     candidate_id = new_id()
 
     await conn.execute(
         """
         INSERT INTO promotion_candidates
-            (id, entity, entity_type, trigger, status, confidence,
+            (id, entity, entity_type, entity_domain, trigger, status, confidence,
              source_message_ids, narrative, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'pending_review', ?, ?, '', ?, ?)
+        VALUES (?, ?, ?, ?, ?, 'pending_review', ?, ?, '', ?, ?)
         """,
         (
             candidate_id,
             entity,
             entity_type,
+            entity_domain,
             trigger,
             confidence,
             json.dumps(source_message_ids),

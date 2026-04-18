@@ -2,11 +2,12 @@
 -- All agents hit this database first to discover topic databases
 -- and to perform cross-domain queries without touching topic DBs directly.
 --
--- Schema version: 3
+-- Schema version: 4
 -- Migration strategy: bump _schema_meta 'schema_version' and add
 --   a corresponding migration in cairn/db/migrations/.
 -- v1 → v2: added methodology_executions table (Phase 3).
 -- v2 → v3: added promotion_candidates table (Phase 4).
+-- v3 → v4: added entity_domain column to promotion_candidates (Phase 4.2).
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -22,7 +23,7 @@ CREATE TABLE IF NOT EXISTS _schema_meta (
 );
 
 INSERT OR IGNORE INTO _schema_meta (key, value) VALUES
-    ('schema_version', '3'),
+    ('schema_version', '4'),
     ('domain',         'index');
 
 
@@ -166,6 +167,12 @@ CREATE TABLE IF NOT EXISTS promotion_candidates (
     id                  TEXT PRIMARY KEY,       -- UUID v7
     entity              TEXT NOT NULL,          -- canonical entity value (IP, hostname, CVE ID, etc.)
     entity_type         TEXT NOT NULL,          -- ipv4 | ipv6 | fqdn | cve | technique | actor
+                                                -- Phase 4.2: arn | aws_account_id | aws_region |
+                                                --   azure_subscription_id | azure_resource_group |
+                                                --   cidr | vlan | cyberark_safe
+    entity_domain       TEXT,                   -- IT domain hint from entity extractor (Phase 4.2)
+                                                -- NULL for cybersecurity entities; 'aws' | 'azure' |
+                                                -- 'networking' | 'systems' | 'pam' for IT entities
     trigger             TEXT NOT NULL
                             CHECK (trigger IN ('corroboration', 'human', 'agent')),
     status              TEXT NOT NULL DEFAULT 'pending_review'

@@ -94,6 +94,7 @@ def write_note(
     promoted_at: str,
     tags: list[str] | None = None,
     related_links: list[str] | None = None,
+    domain: str | None = None,
 ) -> str:
     """Write or update an Obsidian vault note for a promoted entity.
 
@@ -104,24 +105,40 @@ def write_note(
     Args:
         vault_root:         Absolute path to the Obsidian vault root.
         entity:             Canonical entity value (e.g. "APT29", "203.0.113.1").
-        entity_type:        One of: ipv4, ipv6, fqdn, cve, technique, actor.
+        entity_type:        Entity type string — see entity_extractor.py for the
+                            full vocabulary.
         narrative:          Markdown body for the ## Summary section.
         source_message_ids: Blackboard message IDs that produced this promotion.
         confidence:         Promotion confidence score (0–1) or None.
         promoted_at:        ISO8601 timestamp of the promotion event.
         tags:               Additional Obsidian tags (beyond auto-generated ones).
         related_links:      Pre-resolved wikilinks for the ## Related section.
+        domain:             Optional IT domain hint from the entity extractor
+                            (Phase 4.2).  When set, the note is written to
+                            ``cairn/{domain}/`` instead of ``cairn/``.
+                            Cybersecurity entities leave this as None and
+                            continue writing to the flat ``cairn/`` directory.
 
     Returns:
-        Vault-relative path of the written note (e.g. "cairn/APT29.md").
+        Vault-relative path of the written note
+        (e.g. ``"cairn/APT29.md"`` or ``"cairn/aws/arn_aws_iam_...md"``).
     """
-    cairn_dir = vault_root / _CAIRN_SUBDIR
-    cairn_dir.mkdir(parents=True, exist_ok=True)
+    # Determine target directory within the vault.
+    # IT domain entities go into cairn/{domain}/; cybersecurity entities stay
+    # in the flat cairn/ directory for backward compatibility.
+    if domain:
+        target_dir = vault_root / _CAIRN_SUBDIR / domain
+        vault_rel_prefix = f"{_CAIRN_SUBDIR}/{domain}"
+    else:
+        target_dir = vault_root / _CAIRN_SUBDIR
+        vault_rel_prefix = _CAIRN_SUBDIR
+
+    target_dir.mkdir(parents=True, exist_ok=True)  # creates domain subdir if needed
 
     # Sanitise entity name for use as a filename
     safe_name  = _safe_filename(entity)
-    note_file  = cairn_dir / f"{safe_name}.md"
-    vault_rel  = f"{_CAIRN_SUBDIR}/{safe_name}.md"
+    note_file  = target_dir / f"{safe_name}.md"
+    vault_rel  = f"{vault_rel_prefix}/{safe_name}.md"
 
     now_iso = _now_iso()
 
@@ -259,12 +276,22 @@ def _format_evidence_entry(
 
 def _entity_type_to_tag(entity_type: str) -> str:
     mapping = {
+        # Cybersecurity entity types (Phase 4.1 and earlier)
         "ipv4":      "ip-address",
         "ipv6":      "ip-address",
         "fqdn":      "hostname",
         "cve":       "vulnerability",
         "technique": "mitre-attack",
         "actor":     "threat-actor",
+        # IT domain entity types (Phase 4.2)
+        "arn":                    "aws-resource",
+        "aws_account_id":         "aws-account",
+        "aws_region":             "aws-region",
+        "azure_subscription_id":  "azure-subscription",
+        "azure_resource_group":   "azure-resource-group",
+        "cidr":                   "network-range",
+        "vlan":                   "vlan",
+        "cyberark_safe":          "pam-safe",
     }
     return mapping.get(entity_type, entity_type)
 
