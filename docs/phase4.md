@@ -378,3 +378,161 @@ This table is in `index.db` (schema version 3).  Apply with:
 ```bash
 cairn-admin migrate
 ```
+
+---
+
+# Phase 4.2 — IT Domain Expansion
+
+Phase 4.2 extends the blackboard with five IT infrastructure topic databases,
+adds entity extraction patterns for cloud and networking entities, and routes
+promoted vault notes into domain-specific subdirectories.
+
+---
+
+## New Topic Databases
+
+Five new topic databases are registered alongside the original cybersecurity
+databases:
+
+| Slug          | File            | Domain              |
+|---------------|-----------------|---------------------|
+| `aws`         | `aws.db`        | AWS cloud           |
+| `azure`       | `azure.db`      | Azure cloud         |
+| `networking`  | `networking.db` | Network topology    |
+| `systems`     | `systems.db`    | Hosts and FQDNs     |
+| `pam`         | `pam.db`        | Privileged access   |
+
+All five share a common schema defined in `cairn/db/schema/topic_common.sql`.
+The schema is identical to the `messages` table in the cybersecurity databases —
+the same `POST /messages` and `GET /messages` endpoints serve all topic DBs.
+
+Initialise with:
+
+```bash
+cairn-admin init-db   # idempotent — safe to run on an existing installation
+```
+
+---
+
+## Extended Entity Extraction
+
+The entity extractor (`cairn.nlp.entity_extractor`) now recognises IT
+infrastructure entities in addition to the original cybersecurity types.
+Callers pass `topic_db` to opt in to domain-specific tagging:
+
+```python
+entities = extract(body, tags=tags, topic_db="systems")
+```
+
+### Full entity type reference
+
+| Entity type              | Example                                          | Domain          |
+|--------------------------|--------------------------------------------------|-----------------|
+| `ipv4`                   | `203.0.113.42`                                   | cybersecurity   |
+| `ipv6`                   | `2001:db8::1`                                    | cybersecurity   |
+| `fqdn`                   | `host.example.com`                               | cybersecurity   |
+| `cve`                    | `CVE-2024-12345`                                 | cybersecurity   |
+| `technique`              | `T1059.003`                                      | cybersecurity   |
+| `actor`                  | `APT29`                                          | cybersecurity   |
+| `arn`                    | `arn:aws:s3:us-east-1:123456789012:my-bucket`    | aws             |
+| `aws_account_id`         | `123456789012`                                   | aws             |
+| `aws_region`             | `us-east-1`                                      | aws             |
+| `azure_subscription_id`  | `a1b2c3d4-...` (UUID with Azure context)         | azure           |
+| `azure_resource_group`   | `/subscriptions/.../resourceGroups/my-rg`        | azure           |
+| `cidr`                   | `10.0.0.0/16`                                    | networking      |
+| `vlan`                   | `VLAN 42` / `vlan42`                             | networking      |
+| `cyberark_safe`          | `Safe: ProdServers` / `cyberark_safe` tag        | pam             |
+| `fqdn` (systems domain)  | `host.example.com` (when `topic_db="systems"`)   | systems         |
+
+**Context-guarded patterns** — AWS account IDs and Azure subscription UUIDs
+are common number formats that appear in non-infrastructure text. The extractor
+requires contextual keywords within a short window of the match (e.g. `account`,
+`aws`, `subscription`) to suppress false positives.
+
+### `Entity.domain` field
+
+`Entity` now carries an optional `domain` hint:
+
+```python
+@dataclass(frozen=True)
+class Entity:
+    type: str        # entity type string
+    value: str       # normalised extracted value
+    domain: str | None = None   # "aws" | "azure" | "networking" | "systems" | "pam" | None
+```
+
+`domain` is `None` for all original cybersecurity entity types. This field
+drives vault routing at promotion time (see below).
+
+---
+
+## Domain-Aware Vault Routing
+
+When a promotion candidate is approved, `write_note()` routes the vault note
+to a subdirectory based on the `entity_domain` stored on the candidate:
+
+| `entity_domain` | Vault path                        |
+|-----------------|-----------------------------------|
+| `aws`           | `vault/cairn/aws/<entity>.md`     |
+| `azure`         | `vault/cairn/azure/<entity>.md`   |
+| `networking`    | `vault/cairn/networking/<entity>.md` |
+| `systems`       | `vault/cairn/systems/<entity>.md` |
+| `pam`           | `vault/cairn/pam/<entity>.md`     |
+| `None`          | `vault/cairn/<entity>.md`         |
+
+The `entity_domain` value is captured by the corroboration job at detection
+time and persisted on the `promotion_candidates` row, so routing is correct
+even when a human approves the candidate hours later.
+
+---
+
+## Updated Database Schema
+
+### `promotion_candidates` (schema version 4)
+
+One column was added in Phase 4.2. Apply migration `004_add_entity_domain.sql`:
+
+```bash
+cairn-admin migrate
+```
+
+| Column               | Type    | Description                                              |
+|----------------------|---------|----------------------------------------------------------|
+| `id`                 | TEXT    | UUID v7 primary key                                      |
+| `entity`             | TEXT    | Canonical entity value (IP, CVE, actor name, ARN, etc.) |
+| `entity_type`        | TEXT    | Entity type string (see table above)                    |
+| `entity_domain`      | TEXT    | IT domain hint — `aws`, `azure`, etc. NULL for cyber    |
+| `trigger`            | TEXT    | `corroboration` / `human` / `agent`                     |
+| `status`             | TEXT    | `pending_review` / `promoted` / `dismissed`             |
+| `confidence`         | REAL    | Optional confidence score [0, 1]                        |
+| `source_message_ids` | TEXT    | JSON array of blackboard message IDs                    |
+| `narrative`          | TEXT    | Markdown narrative for the vault note ## Summary        |
+| `reviewer_id`        | TEXT    | Set when status transitions to promoted/dismissed       |
+| `vault_path`         | TEXT    | Vault-relative path of the written note                 |
+| `created_at`         | TEXT    | ISO8601                                                  |
+| `updated_at`         | TEXT    | ISO8601                                                  |
+| `ext`                | TEXT    | JSON extension point                                     |
+
+### IT topic databases (schema version 1)
+
+All five new topic databases (`aws.db`, `azure.db`, `networking.db`,
+`systems.db`, `pam.db`) use the shared schema from
+`cairn/db/schema/topic_common.sql`. The messages table is identical in
+structure to the cybersecurity topic databases — same columns, same indexes.
+
+---
+
+## Updated `_entity_type_to_tag` Mapping
+
+The vault writer's tag generator now maps all IT entity types to Obsidian tags:
+
+| Entity type             | Obsidian tag              |
+|-------------------------|---------------------------|
+| `arn`                   | `aws-arn`                 |
+| `aws_account_id`        | `aws-account`             |
+| `aws_region`            | `aws-region`              |
+| `azure_subscription_id` | `azure-subscription`      |
+| `azure_resource_group`  | `azure-resource-group`    |
+| `cidr`                  | `network-cidr`            |
+| `vlan`                  | `network-vlan`            |
+| `cyberark_safe`         | `pam-safe`                |
