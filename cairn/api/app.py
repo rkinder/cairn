@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from cairn.api.broadcast import MessageBroadcaster
+from cairn.api.deps import get_couchdb_client
 from cairn.api.routes import messages, methodologies, promotions, stream, vault, webhooks
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
@@ -79,11 +80,24 @@ async def lifespan(app: FastAPI):
 
     logger.info("Cairn ready — %d topic DB(s) active", len(topic_paths))
 
+    # CouchDB startup probe (Phase 4.4) — non-fatal if unreachable
+    couchdb = get_couchdb_client()
+    if couchdb is not None:
+        if await couchdb.ping():
+            logger.info("CouchDB vault sync ready at %s", settings.couchdb_url)
+        else:
+            logger.warning(
+                "CouchDB vault sync unreachable at %s — promotions will disk-write only",
+                settings.couchdb_url,
+            )
+
     yield
 
     # Shutdown
     scheduler.shutdown(wait=False)
     await db.close()
+    if couchdb is not None:
+        await couchdb.close()
     logger.info("Cairn shut down cleanly.")
 
 

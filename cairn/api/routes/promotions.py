@@ -41,14 +41,14 @@ import chromadb
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from cairn.api.deps import authenticated_agent, get_db_manager
+from cairn.api.deps import authenticated_agent, get_couchdb_client, get_db_manager
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
 from cairn.jobs.promotion_scorer import PromotionScorer
 from cairn.nlp.entity_extractor import extract
 from cairn.sync.vault_sync import get_vault_collection, upsert_vault_note
 from cairn.vault.wikilink_resolver import WikilinkResolver
-from cairn.vault.writer import write_note
+from cairn.vault.writer import WriteResult, write_note
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/promotions", tags=["promotions"])
@@ -421,13 +421,17 @@ async def promote_candidate(
     confidence  = row["confidence"]
     now_iso     = _now_iso()
 
+    # Fetch full message bodies from topic DBs (Bug 001 fix)
+    source_findings = await _fetch_source_findings(db, source_ids)
+
     # Resolve related wikilinks from the entity itself
     resolver      = _get_resolver()
     related_links = _build_related_links(entity, entity_type, source_ids, resolver)
 
-    # Write to vault (Phase 4.2: pass domain for domain-aware subdirectory routing)
+    # Write to vault (disk first, then best-effort CouchDB sync — Phase 4.4)
+    couchdb_client = get_couchdb_client()
     try:
-        vault_rel = write_note(
+        write_result: WriteResult = await write_note(
             settings.vault_path,
             entity=entity,
             entity_type=entity_type,
@@ -437,12 +441,22 @@ async def promote_candidate(
             promoted_at=now_iso,
             related_links=related_links,
             domain=entity_domain,
+            couchdb_client=couchdb_client,
+            source_findings=source_findings,
         )
     except Exception as exc:
         logger.exception("promote_candidate: vault write failed for %s", candidate_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Vault write failed: {exc}",
+        )
+
+    vault_rel = write_result.vault_rel
+    if not write_result.couchdb_synced and couchdb_client is not None:
+        logger.warning(
+            "promote_candidate: CouchDB sync failed for %s: %s",
+            candidate_id,
+            write_result.couchdb_error,
         )
 
     # Register the new note in the wikilink resolver cache
@@ -601,6 +615,51 @@ def _build_related_links(
     if tag:
         links.append(resolver.resolve(tag))
     return links
+
+
+async def _fetch_source_findings(db: DatabaseManager, source_ids: list[str]) -> list[dict]:
+    """Fetch full message bodies for source message IDs from their topic DBs.
+
+    Queries message_index to find which topic DB each message lives in, then
+    fetches the body from that topic DB.  Missing or unreadable messages are
+    silently skipped so a single bad reference never blocks a promotion.
+    """
+    if not source_ids:
+        return []
+
+    # Build reverse map: topic_db_id (UUID) → slug using public DatabaseManager API
+    topic_id_to_slug = {db.topic_id(slug): slug for slug in db.known_topics()}
+
+    placeholders = ",".join("?" * len(source_ids))
+    cursor = await db.index_conn.execute(
+        f"SELECT id, topic_db_id, agent_id, timestamp FROM message_index WHERE id IN ({placeholders})",
+        source_ids,
+    )
+    idx_rows = await cursor.fetchall()
+
+    findings: list[dict] = []
+    for idx_row in idx_rows:
+        slug = topic_id_to_slug.get(idx_row["topic_db_id"])
+        if not slug:
+            logger.warning("_fetch_source_findings: unknown topic_db_id for message %s", idx_row["id"])
+            continue
+        try:
+            topic_conn = db.topic_conn(slug)
+            msg_cursor = await topic_conn.execute(
+                "SELECT body FROM messages WHERE id = ?",
+                (idx_row["id"],),
+            )
+            msg_row = await msg_cursor.fetchone()
+            if msg_row and msg_row["body"]:
+                findings.append({
+                    "agent_id": idx_row["agent_id"],
+                    "timestamp": idx_row["timestamp"],
+                    "body": msg_row["body"],
+                })
+        except Exception:
+            logger.warning("_fetch_source_findings: could not fetch body for message %s", idx_row["id"])
+
+    return findings
 
 
 def _now_iso() -> str:

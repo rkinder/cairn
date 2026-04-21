@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from cairn.vault.writer import _entity_type_to_tag, write_note
+from cairn.vault.writer import WriteResult, _entity_type_to_tag, write_note
 
 
 # ---------------------------------------------------------------------------
@@ -38,9 +38,9 @@ PROMOTED_AT = "2026-04-17T10:00:00Z"
 SOURCE_IDS = ["msg-001", "msg-002"]
 
 
-def make_note(vault_root: Path, entity: str, entity_type: str, domain: str | None = None) -> str:
+async def make_note(vault_root: Path, entity: str, entity_type: str, domain: str | None = None) -> WriteResult:
     """Convenience wrapper that calls write_note with minimal required args."""
-    return write_note(
+    return await write_note(
         vault_root,
         entity=entity,
         entity_type=entity_type,
@@ -57,44 +57,43 @@ def make_note(vault_root: Path, entity: str, entity_type: str, domain: str | Non
 # ---------------------------------------------------------------------------
 
 class TestDomainAwareRouting:
-    def test_aws_entity_writes_to_aws_subdirectory(self, tmp_path: Path):
-        vault_rel = make_note(tmp_path, "arn:aws:iam::123:role/Admin", "arn", domain="aws")
-        assert vault_rel.startswith("cairn/aws/"), f"Expected cairn/aws/, got {vault_rel}"
-        note_file = tmp_path / vault_rel
+    async def test_aws_entity_writes_to_aws_subdirectory(self, tmp_path: Path):
+        result = await make_note(tmp_path, "arn:aws:iam::123:role/Admin", "arn", domain="aws")
+        assert result.vault_rel.startswith("cairn/aws/"), f"Expected cairn/aws/, got {result.vault_rel}"
+        note_file = tmp_path / result.vault_rel
         assert note_file.exists()
 
-    def test_azure_entity_writes_to_azure_subdirectory(self, tmp_path: Path):
-        vault_rel = make_note(tmp_path, "my-rg-001", "azure_resource_group", domain="azure")
-        assert vault_rel.startswith("cairn/azure/")
-        assert (tmp_path / vault_rel).exists()
+    async def test_azure_entity_writes_to_azure_subdirectory(self, tmp_path: Path):
+        result = await make_note(tmp_path, "my-rg-001", "azure_resource_group", domain="azure")
+        assert result.vault_rel.startswith("cairn/azure/")
+        assert (tmp_path / result.vault_rel).exists()
 
-    def test_networking_entity_writes_to_networking_subdirectory(self, tmp_path: Path):
-        vault_rel = make_note(tmp_path, "10.100.0.0/16", "cidr", domain="networking")
-        assert vault_rel.startswith("cairn/networking/")
-        assert (tmp_path / vault_rel).exists()
+    async def test_networking_entity_writes_to_networking_subdirectory(self, tmp_path: Path):
+        result = await make_note(tmp_path, "10.100.0.0/16", "cidr", domain="networking")
+        assert result.vault_rel.startswith("cairn/networking/")
+        assert (tmp_path / result.vault_rel).exists()
 
-    def test_systems_entity_writes_to_systems_subdirectory(self, tmp_path: Path):
-        vault_rel = make_note(tmp_path, "host.corp.local", "fqdn", domain="systems")
-        assert vault_rel.startswith("cairn/systems/")
-        assert (tmp_path / vault_rel).exists()
+    async def test_systems_entity_writes_to_systems_subdirectory(self, tmp_path: Path):
+        result = await make_note(tmp_path, "host.corp.local", "fqdn", domain="systems")
+        assert result.vault_rel.startswith("cairn/systems/")
+        assert (tmp_path / result.vault_rel).exists()
 
-    def test_pam_entity_writes_to_pam_subdirectory(self, tmp_path: Path):
-        vault_rel = make_note(tmp_path, "AWS-Console-Access", "cyberark_safe", domain="pam")
-        assert vault_rel.startswith("cairn/pam/")
-        assert (tmp_path / vault_rel).exists()
+    async def test_pam_entity_writes_to_pam_subdirectory(self, tmp_path: Path):
+        result = await make_note(tmp_path, "AWS-Console-Access", "cyberark_safe", domain="pam")
+        assert result.vault_rel.startswith("cairn/pam/")
+        assert (tmp_path / result.vault_rel).exists()
 
-    def test_cybersecurity_entity_writes_to_cairn_root(self, tmp_path: Path):
+    async def test_cybersecurity_entity_writes_to_cairn_root(self, tmp_path: Path):
         """Entities without domain write to cairn/ root — no subdirectory."""
-        vault_rel = make_note(tmp_path, "APT29", "actor", domain=None)
-        assert vault_rel.startswith("cairn/")
-        # Confirm there is NO extra level after 'cairn/'
-        parts = vault_rel.split("/")
-        assert len(parts) == 2, f"Expected cairn/<file>.md, got {vault_rel}"
-        assert (tmp_path / vault_rel).exists()
+        result = await make_note(tmp_path, "APT29", "actor", domain=None)
+        assert result.vault_rel.startswith("cairn/")
+        parts = result.vault_rel.split("/")
+        assert len(parts) == 2, f"Expected cairn/<file>.md, got {result.vault_rel}"
+        assert (tmp_path / result.vault_rel).exists()
 
-    def test_domain_none_unchanged_from_pre_phase42(self, tmp_path: Path):
+    async def test_domain_none_unchanged_from_pre_phase42(self, tmp_path: Path):
         """No domain argument → same behaviour as before Phase 4.2."""
-        vault_rel = write_note(
+        result = await write_note(
             tmp_path,
             entity="CVE-2024-12345",
             entity_type="cve",
@@ -103,8 +102,8 @@ class TestDomainAwareRouting:
             confidence=0.95,
             promoted_at=PROMOTED_AT,
         )
-        assert vault_rel == "cairn/CVE-2024-12345.md"
-        assert (tmp_path / vault_rel).exists()
+        assert result.vault_rel == "cairn/CVE-2024-12345.md"
+        assert (tmp_path / result.vault_rel).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -112,17 +111,17 @@ class TestDomainAwareRouting:
 # ---------------------------------------------------------------------------
 
 class TestDirectoryCreation:
-    def test_domain_subdirectory_created_if_missing(self, tmp_path: Path):
+    async def test_domain_subdirectory_created_if_missing(self, tmp_path: Path):
         """Domain subdir is created automatically on first write."""
         domain_dir = tmp_path / "cairn" / "aws"
         assert not domain_dir.exists()
-        make_note(tmp_path, "my-arn", "arn", domain="aws")
+        await make_note(tmp_path, "my-arn", "arn", domain="aws")
         assert domain_dir.is_dir()
 
-    def test_nested_domain_directory_not_broken_by_second_write(self, tmp_path: Path):
+    async def test_nested_domain_directory_not_broken_by_second_write(self, tmp_path: Path):
         """Second write to same domain doesn't raise even if dir exists."""
-        make_note(tmp_path, "arn1", "arn", domain="aws")
-        make_note(tmp_path, "arn2", "arn", domain="aws")
+        await make_note(tmp_path, "arn1", "arn", domain="aws")
+        await make_note(tmp_path, "arn2", "arn", domain="aws")
         assert (tmp_path / "cairn" / "aws").is_dir()
 
 
@@ -131,13 +130,13 @@ class TestDirectoryCreation:
 # ---------------------------------------------------------------------------
 
 class TestNoteContent:
-    def test_note_contains_entity_type_tag(self, tmp_path: Path):
-        vault_rel = make_note(tmp_path, "AWS-Console-Access", "cyberark_safe", domain="pam")
-        content = (tmp_path / vault_rel).read_text(encoding="utf-8")
+    async def test_note_contains_entity_type_tag(self, tmp_path: Path):
+        result = await make_note(tmp_path, "AWS-Console-Access", "cyberark_safe", domain="pam")
+        content = (tmp_path / result.vault_rel).read_text(encoding="utf-8")
         assert "pam-safe" in content
 
-    def test_note_contains_narrative(self, tmp_path: Path):
-        vault_rel = write_note(
+    async def test_note_contains_narrative(self, tmp_path: Path):
+        result = await write_note(
             tmp_path,
             entity="VLAN 100",
             entity_type="vlan",
@@ -147,24 +146,44 @@ class TestNoteContent:
             promoted_at=PROMOTED_AT,
             domain="networking",
         )
-        content = (tmp_path / vault_rel).read_text(encoding="utf-8")
+        content = (tmp_path / result.vault_rel).read_text(encoding="utf-8")
         assert "Segmentation VLAN for DMZ hosts." in content
 
-    def test_existing_note_updated_in_domain_subdirectory(self, tmp_path: Path):
+    async def test_existing_note_updated_in_domain_subdirectory(self, tmp_path: Path):
         """Second write to same entity appends to evidence rather than creating duplicate."""
-        make_note(tmp_path, "AWS-Console-Access", "cyberark_safe", domain="pam")
-        make_note(tmp_path, "AWS-Console-Access", "cyberark_safe", domain="pam")
-        # Only one file should exist
+        await make_note(tmp_path, "AWS-Console-Access", "cyberark_safe", domain="pam")
+        await make_note(tmp_path, "AWS-Console-Access", "cyberark_safe", domain="pam")
         pam_dir = tmp_path / "cairn" / "pam"
         files = list(pam_dir.glob("*.md"))
         assert len(files) == 1
-        # The evidence section should have two entries
         content = files[0].read_text(encoding="utf-8")
-        assert content.count("msg-001") >= 2  # once per evidence entry
+        assert content.count("msg-001") >= 2
 
 
 # ---------------------------------------------------------------------------
-# _entity_type_to_tag — extended mapping
+# WriteResult — no-client path returns correct defaults
+# ---------------------------------------------------------------------------
+
+class TestWriteResult:
+    async def test_returns_write_result(self, tmp_path: Path):
+        result = await make_note(tmp_path, "APT29", "actor")
+        assert isinstance(result, WriteResult)
+
+    async def test_couchdb_synced_false_when_no_client(self, tmp_path: Path):
+        result = await make_note(tmp_path, "APT29", "actor")
+        assert result.couchdb_synced is False
+
+    async def test_couchdb_error_none_when_no_client(self, tmp_path: Path):
+        result = await make_note(tmp_path, "APT29", "actor")
+        assert result.couchdb_error is None
+
+    async def test_vault_rel_in_result(self, tmp_path: Path):
+        result = await make_note(tmp_path, "APT29", "actor")
+        assert result.vault_rel == "cairn/APT29.md"
+
+
+# ---------------------------------------------------------------------------
+# _entity_type_to_tag — extended mapping (sync, unchanged)
 # ---------------------------------------------------------------------------
 
 class TestEntityTypeToTag:

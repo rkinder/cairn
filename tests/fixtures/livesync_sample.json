@@ -1,0 +1,10 @@
+{
+  "_id": "cairn/APT29.md",
+  "_rev": "1-a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7",
+  "data": "---\ntitle: APT29\ntags: [threat-actor, cairn-promoted]\nentity_type: actor\nconfidence: 0.91\nsources:\n  - msg-00234\n  - msg-00198\npromoted_at: 2026-04-14T10:32:00Z\nlast_updated: 2026-04-14T10:32:00Z\n---\n\n## Summary\n\nObserved named pipe `\\\\.\\pipe\\msagent_81` consistent with Cobalt Strike default configuration.\n\n## Evidence\n\n- **2026-04-14T10:32:00Z** — msg-00234, msg-00198\n\n## Related\n\n[[threat-actor]]\n",
+  "ctime": 1713628320000,
+  "mtime": 1713628320000,
+  "size": 412,
+  "type": "plain",
+  "children": []
+}

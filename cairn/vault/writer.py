@@ -60,8 +60,13 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cairn.vault.couchdb_sync import CouchDBVaultClient
 
 logger = logging.getLogger(__name__)
 
@@ -72,18 +77,29 @@ logger = logging.getLogger(__name__)
 # Subdirectory within the vault for Cairn-promoted notes
 _CAIRN_SUBDIR = "cairn"
 
+@dataclass(frozen=True)
+class WriteResult:
+    """Result of a write_note() call."""
+    vault_rel: str
+    couchdb_synced: bool
+    couchdb_error: str | None
+
+
 # Regex to find and update last_updated in frontmatter
 _RE_LAST_UPDATED = re.compile(r"^last_updated\s*:.*$", re.MULTILINE)
 
 # Regex to find the ## Evidence section so we can append to it
 _RE_EVIDENCE_SECTION = re.compile(r"(## Evidence\s*\n)", re.IGNORECASE)
 
+# Regex to find the ## Source Findings section
+_RE_SOURCE_FINDINGS_SECTION = re.compile(r"(## Source Findings\s*\n)", re.IGNORECASE)
+
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def write_note(
+async def write_note(
     vault_root: Path,
     *,
     entity: str,
@@ -95,37 +111,38 @@ def write_note(
     tags: list[str] | None = None,
     related_links: list[str] | None = None,
     domain: str | None = None,
-) -> str:
+    couchdb_client: "CouchDBVaultClient | None" = None,
+    source_findings: list[dict] | None = None,
+) -> WriteResult:
     """Write or update an Obsidian vault note for a promoted entity.
 
-    If a note for *entity* already exists in the Cairn subdirectory, a new
-    Evidence entry is appended and ``last_updated`` is refreshed.  Otherwise a
-    new note is created from scratch.
+    Performs a disk write first (primary store), then a best-effort CouchDB
+    sync so Obsidian LiveSync clients receive the note immediately.  CouchDB
+    failures are logged but do not prevent the promotion from completing.
 
     Args:
         vault_root:         Absolute path to the Obsidian vault root.
         entity:             Canonical entity value (e.g. "APT29", "203.0.113.1").
-        entity_type:        Entity type string — see entity_extractor.py for the
-                            full vocabulary.
+        entity_type:        Entity type string — see entity_extractor.py.
         narrative:          Markdown body for the ## Summary section.
         source_message_ids: Blackboard message IDs that produced this promotion.
         confidence:         Promotion confidence score (0–1) or None.
         promoted_at:        ISO8601 timestamp of the promotion event.
         tags:               Additional Obsidian tags (beyond auto-generated ones).
         related_links:      Pre-resolved wikilinks for the ## Related section.
-        domain:             Optional IT domain hint from the entity extractor
-                            (Phase 4.2).  When set, the note is written to
-                            ``cairn/{domain}/`` instead of ``cairn/``.
-                            Cybersecurity entities leave this as None and
-                            continue writing to the flat ``cairn/`` directory.
+        domain:             Optional IT domain hint (Phase 4.2) — routes the
+                            note into ``cairn/{domain}/`` when set.
+        couchdb_client:     Optional CouchDB client for LiveSync sync (Phase 4.4).
+                            When None, disk-only write; ``couchdb_synced`` is False.
+        source_findings:    Full message bodies from source messages. Each dict
+                            contains ``agent_id``, ``timestamp``, and ``body``.
+                            Rendered as a ``## Source Findings`` section so the
+                            vault note preserves the complete original content.
 
     Returns:
-        Vault-relative path of the written note
-        (e.g. ``"cairn/APT29.md"`` or ``"cairn/aws/arn_aws_iam_...md"``).
+        WriteResult with vault_rel path and CouchDB sync status.
     """
     # Determine target directory within the vault.
-    # IT domain entities go into cairn/{domain}/; cybersecurity entities stay
-    # in the flat cairn/ directory for backward compatibility.
     if domain:
         target_dir = vault_root / _CAIRN_SUBDIR / domain
         vault_rel_prefix = f"{_CAIRN_SUBDIR}/{domain}"
@@ -133,12 +150,11 @@ def write_note(
         target_dir = vault_root / _CAIRN_SUBDIR
         vault_rel_prefix = _CAIRN_SUBDIR
 
-    target_dir.mkdir(parents=True, exist_ok=True)  # creates domain subdir if needed
+    target_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sanitise entity name for use as a filename
-    safe_name  = _safe_filename(entity)
-    note_file  = target_dir / f"{safe_name}.md"
-    vault_rel  = f"{vault_rel_prefix}/{safe_name}.md"
+    safe_name = _safe_filename(entity)
+    note_file = target_dir / f"{safe_name}.md"
+    vault_rel = f"{vault_rel_prefix}/{safe_name}.md"
 
     now_iso = _now_iso()
 
@@ -148,6 +164,7 @@ def write_note(
             source_message_ids=source_message_ids,
             promoted_at=promoted_at,
             now_iso=now_iso,
+            source_findings=source_findings,
         )
         logger.info("vault/writer: updated existing note %s", vault_rel)
     else:
@@ -161,11 +178,41 @@ def write_note(
             tags=tags or [],
             related_links=related_links or [],
             now_iso=now_iso,
+            source_findings=source_findings,
         )
         note_file.write_text(content, encoding="utf-8")
         logger.info("vault/writer: created new note %s", vault_rel)
 
-    return vault_rel
+    # CouchDB sync — best effort, disk is the primary store
+    couchdb_synced = False
+    couchdb_error: str | None = None
+
+    if couchdb_client is not None:
+        stat = note_file.stat()
+        ctime_ms = int(stat.st_ctime * 1000)
+        mtime_ms = int(stat.st_mtime * 1000)
+        file_content = note_file.read_text(encoding="utf-8")
+
+        put_result = await couchdb_client.put_note(
+            vault_rel_path=vault_rel,
+            content=file_content,
+            ctime_ms=ctime_ms,
+            mtime_ms=mtime_ms,
+        )
+        couchdb_synced = put_result.success
+        couchdb_error = put_result.error
+        if not put_result.success:
+            logger.warning(
+                "vault/writer: CouchDB sync failed for %s: %s",
+                vault_rel,
+                couchdb_error,
+            )
+
+    return WriteResult(
+        vault_rel=vault_rel,
+        couchdb_synced=couchdb_synced,
+        couchdb_error=couchdb_error,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +230,7 @@ def _build_new_note(
     tags: list[str],
     related_links: list[str],
     now_iso: str,
+    source_findings: list[dict] | None = None,
 ) -> str:
     """Render the full markdown content for a brand-new vault note."""
 
@@ -213,6 +261,11 @@ def _build_new_note(
 
     narrative_body = narrative.strip() if narrative.strip() else "_No summary provided._"
 
+    # Source Findings section — full message bodies from source messages
+    source_findings_section = ""
+    if source_findings:
+        source_findings_section = "\n## Source Findings\n\n" + _format_source_findings_block(source_findings) + "\n"
+
     return (
         f"---\n"
         f"title: {entity}\n"
@@ -227,6 +280,7 @@ def _build_new_note(
         f"## Summary\n"
         f"\n"
         f"{narrative_body}\n"
+        f"{source_findings_section}"
         f"\n"
         f"## Evidence\n"
         f"\n"
@@ -241,12 +295,30 @@ def _update_existing_note(
     source_message_ids: list[str],
     promoted_at: str,
     now_iso: str,
+    source_findings: list[dict] | None = None,
 ) -> None:
     """Append a new Evidence entry and refresh last_updated."""
     content = note_file.read_text(encoding="utf-8")
 
     # Update last_updated in frontmatter
     content = _RE_LAST_UPDATED.sub(f"last_updated: {now_iso}", content)
+
+    # Append source findings before ## Evidence (create section if missing)
+    if source_findings:
+        new_findings_text = _format_source_findings_block(source_findings)
+        has_source_section = bool(_RE_SOURCE_FINDINGS_SECTION.search(content))
+        ev_match = _RE_EVIDENCE_SECTION.search(content)
+        if ev_match:
+            insert_at = ev_match.start()
+            if has_source_section:
+                content = content[:insert_at] + new_findings_text + "\n\n" + content[insert_at:]
+            else:
+                content = content[:insert_at] + "## Source Findings\n\n" + new_findings_text + "\n\n" + content[insert_at:]
+        else:
+            if has_source_section:
+                content = content.rstrip() + "\n\n" + new_findings_text + "\n"
+            else:
+                content = content.rstrip() + "\n\n## Source Findings\n\n" + new_findings_text + "\n"
 
     # Append to ## Evidence section
     evidence_entry = _format_evidence_entry(
@@ -262,6 +334,18 @@ def _update_existing_note(
         content = content.rstrip() + "\n\n## Evidence\n\n" + evidence_entry + "\n"
 
     note_file.write_text(content, encoding="utf-8")
+
+
+def _format_source_findings_block(source_findings: list[dict]) -> str:
+    """Render source message bodies as markdown subsections."""
+    parts = []
+    for finding in source_findings:
+        agent = finding.get("agent_id") or "unknown"
+        ts = finding.get("timestamp") or ""
+        body = (finding.get("body") or "").strip()
+        header = f"### Finding from {agent} ({ts})" if ts else f"### Finding from {agent}"
+        parts.append(f"{header}\n\n{body}")
+    return "\n\n".join(parts)
 
 
 def _format_evidence_entry(

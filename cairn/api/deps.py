@@ -26,7 +26,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from cairn.api.auth import lookup_agent
 from cairn.api.broadcast import MessageBroadcaster
+from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
+from cairn.vault.couchdb_sync import CouchDBVaultClient
 
 _bearer        = HTTPBearer(auto_error=True)
 _bearer_optional = HTTPBearer(auto_error=False)
@@ -116,6 +118,35 @@ async def stream_authenticated_agent(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return agent
+
+
+# ---------------------------------------------------------------------------
+# CouchDB client singleton (Phase 4.4)
+# ---------------------------------------------------------------------------
+
+_couchdb_client: CouchDBVaultClient | None = None
+
+
+def get_couchdb_client() -> CouchDBVaultClient | None:
+    """Return the shared CouchDB client, or None if disabled or unconfigured."""
+    global _couchdb_client
+    settings = get_settings()
+    if not settings.couchdb_enabled or not settings.couchdb_user:
+        return None
+    if _couchdb_client is None:
+        _couchdb_client = CouchDBVaultClient(
+            url=settings.couchdb_url,
+            username=settings.couchdb_user,
+            password=settings.couchdb_password,
+            database=settings.couchdb_database,
+        )
+    return _couchdb_client
+
+
+def _reset_couchdb_client() -> None:
+    """Reset the singleton — for use in tests only."""
+    global _couchdb_client
+    _couchdb_client = None
 
 
 def agent_can_write(agent: dict, db_name: str) -> None:
