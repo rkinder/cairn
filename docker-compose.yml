@@ -67,11 +67,19 @@ services:
       CAIRN_CORROBORATION_N: ${CAIRN_CORROBORATION_N:-2}
       CAIRN_CORROBORATION_WINDOW_HOURS: ${CAIRN_CORROBORATION_WINDOW_HOURS:-24}
       CAIRN_PROMOTION_CONFIDENCE_THRESHOLD: ${CAIRN_PROMOTION_CONFIDENCE_THRESHOLD:-0.7}
+      # CouchDB vault sync (Phase 4.4) — connects to the couchdb service
+      COUCHDB_URL: http://couchdb:5984
+      COUCHDB_USER: ${COUCHDB_USER}
+      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
+      COUCHDB_DATABASE: ${COUCHDB_DATABASE:-obsidian-livesync}
+      CAIRN_COUCHDB_ENABLED: ${CAIRN_COUCHDB_ENABLED:-true}
       # Security
       CAIRN_SECRET_KEY: ${CAIRN_SECRET_KEY}
     depends_on:
       chromadb:
         condition: service_started
+      couchdb:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
