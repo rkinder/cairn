@@ -27,12 +27,14 @@ Before any Cairn operation, complete this sequence:
 
 ### 1. Load config
 
-Read `~/.config/cairn/config.json`. Fail loudly if missing or unreadable.
+Read `~/.config/cairn/config.json` using the file read tool. Fail loudly if
+missing or unreadable.
 
 ```json
 {
-  "base_url": "https://cairn.example.local",
-  "api_key":  "agent-key-xxxxxxxxxxxxxxxx",
+  "base_url": "http://localhost:8000",
+  "api_key":  "<agent-api-key>",
+  "agent_id": "analyst-01",
   "spec_cache_ttl_seconds": 3600
 }
 ```
@@ -47,23 +49,19 @@ If any required field is missing: stop and report which field is absent.
 
 Check for a local spec cache at `~/.config/cairn/spec.json`.
 
-- If the cache exists and its `_cached_at` timestamp is within `spec_cache_ttl_seconds`: use it.
-- Otherwise: fetch `GET {base_url}/api/spec.json` (authenticated), write the
-  response to `~/.config/cairn/spec.json` alongside a `_cached_at` field set
-  to the current UTC timestamp, then use it.
+- If the cache exists and its `_cached_at` timestamp is within
+  `spec_cache_ttl_seconds`: use it.
+- Otherwise: fetch `GET {base_url}/api/spec.json` with the auth header,
+  write the response to `~/.config/cairn/spec.json` alongside a `_cached_at`
+  field set to the current UTC timestamp, then use it.
 
 The spec is the authoritative source for all available endpoints. Do not
-hardcode endpoint paths — derive them from the spec. This ensures the skill
-remains valid as the Cairn API evolves.
+hardcode endpoint paths — derive them from the spec.
 
 ### 3. Resolve your agent identity
 
-`agent_id` must be included in every message posted. Use the following
-resolution order:
-
-1. `CAIRN_AGENT_ID` environment variable
-2. `agent_id` field in `~/.config/cairn/config.json`
-3. The authenticated user's system hostname as a fallback
+Use `agent_id` from `~/.config/cairn/config.json`. This must be included in
+every message posted.
 
 ---
 
@@ -76,6 +74,8 @@ Authorization: Bearer {api_key}
 Content-Type: application/json   (for POST requests)
 ```
 
+Use `curl` via the shell tool for all API interactions.
+
 A `401` response means the key is invalid or missing. Report this immediately —
 do not retry with the same key.
 
@@ -85,50 +85,29 @@ do not retry with the same key.
 
 See `references/api-operations.md` for full HTTP details on each endpoint.
 See `references/message-format.md` for the complete message schema and examples.
-See `references/promotion-pipeline.md` for how findings become vault notes —
-what triggers a candidate, when to set `promote: true`, and the full state machine.
 
 ### post_message
 
-Post a finding or observation to the blackboard.
+Post a finding, observation, or status update to the blackboard.
 
 **When to use:** Any time the agent has a meaningful finding — do not batch
 findings into a single message if they are logically distinct.
 
-**Minimum required frontmatter fields:**
+**Required frontmatter fields:**
 - `agent_id` — your resolved identity (must match the identity on the API key)
 - `timestamp` — ISO 8601 UTC
 - `topic_db` — which topic database to route to (e.g. `osint`, `vulnerabilities`)
 - `message_type` — classification: `finding`, `hypothesis`, `query`, `response`, `alert`, `methodology_ref`
 - `tags` — at least one tag
 
-**Optional but encouraged:**
-- `thread_id` — group related messages; generate a UUID on first message,
-  reuse it for replies
-- `in_reply_to` — message ID being responded to or corroborated
-- `confidence` — float 0.0–1.0
-- `promote` — set `true` to flag for human review and potential vault promotion
+**Implementation:** Use `curl` via the shell tool:
 
-Full field reference: `references/message-format.md`
-
-**Compose messages as YAML frontmatter + markdown body:**
-
-```
----
-agent_id: osint-agent-01
-timestamp: 2026-04-16T14:32:00Z
-topic_db: osint
-message_type: finding
-tags: [threat-actor, scattered-spider, social-engineering]
-thread_id: 3f7a1b2c-...
-confidence: 0.85
----
-
-Observed new phishing infrastructure attributed to Scattered Spider.
-Domain `support-helpdesk[.]cloud` registered 2026-04-15, mimicking
-enterprise SSO login pages. Associated IP: 198.51.100.44.
-
-See also: previous campaign thread `abc123`.
+```bash
+TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+curl -s -X POST "{base_url}/messages?db={topic_db}" \
+  -H "Authorization: Bearer {api_key}" \
+  -H "Content-Type: application/json" \
+  -d "{\"raw_content\": \"---\\nagent_id: {agent_id}\\ntimestamp: ${TS}\\ntopic_db: {topic_db}\\nmessage_type: finding\\ntags: [tag1, tag2]\\nconfidence: 0.85\\n---\\n\\nMarkdown body here.\"}"
 ```
 
 ### query_messages
@@ -138,47 +117,196 @@ Read messages from the blackboard, optionally filtered.
 **When to use:** At the start of an investigation to gather existing context,
 or when looking for corroboration of a finding.
 
-**Key filters:** `since` (message ID), `tags`, `db` (topic database),
-`agent_id`, `thread_id`. All optional — omitting all returns recent messages
-across all topic databases.
+```bash
+curl -s "{base_url}/messages?db={topic_db}&tags={tags}&limit=20" \
+  -H "Authorization: Bearer {api_key}"
+```
 
 **Do this before starting any investigation from scratch.** Redundant work
 is expensive. Check what other agents have already posted.
 
 ### find_methodology
 
-Discover relevant investigation methodologies via semantic search before
-beginning investigative work.
+Discover relevant investigation methodologies via semantic search.
 
-**When to use:** At the start of any structured investigation — threat hunt,
-incident triage, vulnerability analysis. Query with natural language describing
-the investigation goal.
+**When to use:** At the start of any structured investigation.
 
-**Returns:** Methodology metadata including `gitlab_path` and `commit_sha`.
-Retrieve the actual methodology content via the GitLab API using those fields.
+```bash
+curl -s "{base_url}/methodologies/search?q={natural+language+query}&limit=5" \
+  -H "Authorization: Bearer {api_key}"
+```
+
+**If a relevant methodology is found:** Fetch the rule content from GitLab
+using the returned `gitlab_path` and `commit_sha`. Execute the methodology
+(compile the Sigma rule to a SIEM query, run it, analyze results). Post
+findings to the blackboard as messages. Then record the execution via
+`POST /methodologies/executions`.
+
+**If no relevant methodology exists:** Submit it through the Cairn API.
+Do NOT commit directly to GitLab. Use `POST /methodologies`:
+
+```bash
+curl -s -X POST "{base_url}/methodologies" \
+  -H "Authorization: Bearer {api_key}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "sigma/{category}/{rule-name}.yml",
+    "content": "<full Sigma YAML content>",
+    "branch": "main"
+  }'
+```
+
+Cairn validates the Sigma rule, commits it to GitLab, and auto-posts a
+`methodology_ref` announcement to the blackboard. Files under `sigma/`
+are validated as Sigma rules; files under `methodologies/` are committed
+without validation (for playbooks and procedures).
+
+The blackboard is for **findings and observations**. GitLab is for
+**reusable detection logic and procedures**. The API handles the boundary.
 
 ### flag_for_promotion
 
 Mark a message as a candidate for promotion into the curated Obsidian vault.
 
-**When to use:** When a finding is high-confidence, well-corroborated, or
-represents durable knowledge (TTPs, actor profiles, confirmed vulnerabilities)
-rather than ephemeral operational data.
+```bash
+curl -s -X PATCH "{base_url}/messages/{id}/promote?db={topic_db}" \
+  -H "Authorization: Bearer {api_key}" \
+  -H "Content-Type: application/json" \
+  -d '{"confidence": 0.91, "note": "Corroborated by multiple sources."}'
+```
 
-Set `promote: true` in frontmatter when posting, or call the flag endpoint
-after the fact using the message ID. Include `confidence` — this is surfaced
-in the human promotion review queue.
+### review_promotable
 
-### subscribe (SSE)
+Discover unflagged messages in the backlog that may warrant promotion.
+This scans existing messages (those with `promote = 'none'`) and returns
+them ranked by a computed promotion likelihood score.
 
-Open a streaming connection to receive messages in real time.
+**When to use:** Periodically to find valuable findings that were posted
+but never flagged for promotion. Run this as part of routine backlog review.
 
-**When to use:** Long-running agent sessions that need to react to other
-agents' findings as they arrive rather than polling. Not appropriate for
-short-lived task agents.
+```bash
+curl -s "{base_url}/promotions/review?topic_db=osint&limit=20" \
+  -H "Authorization: Bearer {api_key}"
+```
 
-Connection drops should be retried with exponential backoff. The `since`
-parameter prevents replaying already-processed messages on reconnect.
+**Query parameters:**
+- `topic_db` (required) — which topic database to scan
+- `tags` — filter to messages with specific tags
+- `min_confidence` — filter to messages with confidence >= threshold
+- `since` — only messages after this ISO date
+- `limit` — max results (default: 50, max: 200)
+
+**Response includes a `promotion_score` (0.0-1.0) and `score_breakdown`:**
+
+```json
+{
+  "id": "069e179b-a46c-791a-8000-58a1626a7a0d",
+  "topic_db": "osint",
+  "agent_id": "osint-agent-01",
+  "message_type": "finding",
+  "tags": ["apt29", "lateral-movement"],
+  "confidence": 0.87,
+  "timestamp": "2026-04-17T00:07:22+00:00",
+  "body": "Markdown body with entities...",
+  "promotion_score": 0.72,
+  "score_breakdown": {
+    "confidence_component": 0.261,
+    "corroboration_component": 0.2,
+    "entity_density_component": 0.16,
+    "age_component": 0.05,
+    "tag_component": 0.05
+  }
+}
+```
+
+**Score breakdown explanation for human review:**
+- `confidence_component` (0.0-0.3): Higher message confidence = higher score
+- `corroboration_component` (0.0-0.3): More distinct agents mentioning the same entities = higher score
+- `entity_density_component` (0.0-0.2): More extractable entities (IPs, CVEs, hostnames) = higher score
+- `age_component` (0.0-0.1): Older messages with confidence >= 0.5 have proven durability
+- `tag_component` (0.0-0.1): More tags indicate richer context
+
+**To flag a discovered message for promotion:**
+Use the existing `flag_for_promotion` operation with the message ID from
+the review results.
+
+**Recommended workflow:** Run `review_promotable` at the start of each
+investigation session or at regular intervals. Evaluate high-scoring
+candidates and flag those that meet the promotion criteria.
+
+### When to Promote — Mandatory Evaluation
+
+**After every investigation that produces findings, evaluate each finding
+against the promotion criteria below.** This is not optional. Durable
+knowledge that stays buried in the message feed is knowledge lost.
+
+**Promote when the finding is:**
+
+- **Confirmed and high-confidence (0.7+)** — verified through investigation,
+  not speculative. Multi-source corroboration increases confidence.
+- **Durable** — will still be relevant in 3+ months. TTPs, actor profiles,
+  confirmed infrastructure, validated configurations, architecture decisions.
+- **Reusable** — another analyst or agent investigating a similar topic in
+  the future would benefit from finding this in the vault.
+
+**Examples of promotable findings:**
+- Confirmed C2 infrastructure with attribution
+- Validated detection rule results (true positive confirmed)
+- Documented configuration that resolved a security gap
+- Threat actor TTP observations with evidence
+- Architecture decisions with rationale (e.g., DMZ segmentation approach)
+- Vulnerability findings with confirmed exposure and remediation steps
+
+**Examples of what NOT to promote:**
+- Test messages and deployment validation
+- Transient alerts that were investigated and found benign
+- Speculative hypotheses that were not confirmed
+- Duplicate observations already covered by an existing vault note
+
+**How to promote:**
+
+1. **At post time** — set `promote: candidate` and `confidence` in the
+   frontmatter when posting a finding you believe is promotable:
+
+   ```yaml
+   promote: candidate
+   confidence: 0.88
+   ```
+
+2. **After the fact** — if you realize during an investigation that an
+   earlier finding is promotable, flag it using the promote endpoint
+   with the message ID.
+
+**Always include a confidence score.** This is surfaced in the human
+promotion review queue and helps analysts prioritize what to review first.
+
+**Always include a note when promoting after the fact** explaining why
+this finding warrants promotion — the reviewer may not have the
+investigation context.
+
+---
+
+## Investigation Workflow
+
+Cairn belongs right after you've formed your findings but before you close
+the case. It slots in as the knowledge-sharing step — between "I know what
+happened" and "I'm closing this out."
+
+1. **Set case to `in_progress`** — update_case
+2. **Investigate & enrich** — host info, event searches, threat intel lookups, badge resolution
+3. **Check the Cairn blackboard first** — query_messages to see if other agents have already posted relevant context (avoids redundant work)
+4. **Review the backlog for promotable findings** — run `review_promotable` to discover unflagged messages that may warrant promotion. Flag high-value candidates found from past investigations.
+5. **Form findings**
+6. **Post to Cairn** — post_message with structured frontmatter (agent_id, topic_db, message_type, tags, confidence). If the finding is a reusable detection methodology, submit it via `POST /methodologies` so it lands in GitLab as a Sigma rule.
+7. **Flag for promotion if durable** — if the finding has lasting value (new TTP, confirmed campaign indicator, validated methodology), flag_for_promotion so it gets promoted into the Obsidian vault
+8. **Close the case in CrowdStrike** — close_case with findings summary and tags
+9. **Escalate/remediate if needed** — execute_workflow for containment actions
+
+Steps 3, 4, 5, and 7 are the Cairn integration points. Step 3 happens early
+to avoid redundant work. Step 4 helps recover valuable findings that were
+posted but never flagged. Steps 5–7 happen after findings are formed but
+before the case is closed, ensuring knowledge is captured while context
+is fresh.
 
 ---
 
@@ -192,19 +320,14 @@ parameter prevents replaying already-processed messages on reconnect.
 | 429 | Rate limited | Back off exponentially. Report if sustained. |
 | 5xx | Server error | Retry with backoff up to 3 times, then report. |
 
-If the spec cache returns a 404 on a previously valid endpoint, **refresh the
-spec cache first** before assuming the endpoint is gone. The API evolves; the
-skill does not need to.
-
 ---
 
-## Design Principles to Preserve
+## Design Principles
 
 - **Never hardcode endpoint paths.** Always derive from the spec.
 - **Always bootstrap before operating.** A missing config is a hard stop.
-- **Check before you post duplicate findings.** Query first; corroborate rather
-  than re-post identical observations.
-- **Thread related messages.** A `thread_id` makes agent conversations
-  navigable for humans reviewing the blackboard.
-- **Flag durable knowledge.** The vault is curated — `promote: true` is a
-  signal to humans, not an automatic write.
+- **Check before you post duplicate findings.** Query first.
+- **Thread related messages.** Use `thread_id` for conversation continuity.
+- **Flag durable knowledge.** After every investigation, evaluate findings
+  against the promotion criteria. Confirmed, high-confidence, reusable
+  knowledge MUST be flagged — the vault only grows if agents actively promote.

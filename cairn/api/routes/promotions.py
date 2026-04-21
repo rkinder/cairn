@@ -44,6 +44,7 @@ from pydantic import BaseModel, Field
 from cairn.api.deps import authenticated_agent, get_db_manager
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
+from cairn.jobs.promotion_scorer import PromotionScorer
 from cairn.nlp.entity_extractor import extract
 from cairn.sync.vault_sync import get_vault_collection, upsert_vault_note
 from cairn.vault.wikilink_resolver import WikilinkResolver
@@ -95,6 +96,29 @@ class DismissRequest(BaseModel):
         default=None,
         description="Optional reason for dismissal (stored in narrative).",
     )
+
+
+class ScoreBreakdownResponse(BaseModel):
+    """Breakdown of promotion score components."""
+    confidence_component: float = Field(description="0.0-0.3")
+    corroboration_component: float = Field(description="0.0-0.3")
+    entity_density_component: float = Field(description="0.0-0.2")
+    age_component: float = Field(description="0.0-0.1")
+    tag_component: float = Field(description="0.0-0.1")
+
+
+class PromotionCandidate(BaseModel):
+    """An unflagged message ranked by promotion likelihood."""
+    id: str = Field(description="Message ID")
+    topic_db: str = Field(description="Topic database slug")
+    agent_id: str = Field(description="Agent that posted the message")
+    message_type: str = Field(description="Message type (finding, hypothesis, etc.)")
+    tags: list[str] = Field(default_factory=list, description="Message tags")
+    confidence: float | None = Field(default=None, description="Confidence score if set")
+    timestamp: str = Field(description="Message timestamp (ISO8601)")
+    body: str = Field(description="Message body for agent evaluation")
+    promotion_score: float = Field(description="Computed 0.0-1.0 promotion likelihood")
+    score_breakdown: ScoreBreakdownResponse = Field(description="Score component breakdown")
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +175,180 @@ async def list_candidates(
     )
     rows = await cursor.fetchall()
     return [_row_to_candidate(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Retroactive Promotion Review (Phase 4.3)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/review",
+    operation_id="review_promotable_messages",
+    response_model=list[PromotionCandidate],
+    summary="Review unflagged messages for promotion candidacy",
+    description="""
+Query unflagged messages from a topic database, compute promotion scores,
+and return them ranked by likelihood of promotion.
+
+This endpoint helps agents and analysts discover valuable findings in the
+backlog that were not previously flagged for promotion.
+""",
+)
+async def review_promotable(
+    topic_db: str = Query(
+        ...,
+        description="Topic database to scan (e.g., osint, vulnerabilities, aws)",
+    ),
+    tags: str | None = Query(
+        default=None,
+        description="Comma-separated tag filter (match any)",
+    ),
+    min_confidence: float | None = Query(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence threshold",
+    ),
+    since: str | None = Query(
+        default=None,
+        description="ISO date — only return messages after this date",
+    ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=200,
+        description="Maximum number of results (default: 50, max: 200)",
+    ),
+    _agent: dict = Depends(authenticated_agent),
+    db: DatabaseManager = Depends(get_db_manager),
+) -> list[PromotionCandidate]:
+    """Review unflagged messages for promotion candidacy."""
+    # Validate topic_db exists
+    if topic_db not in db.known_topics():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Topic database '{topic_db}' not found",
+        )
+
+    # Build SQL query for unflagged messages
+    conditions = ["promote = 'none'"]
+    params: list = []
+
+    if tags:
+        # Match any of the provided tags (JSON array in DB)
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        if tag_list:
+            # Use JSON_EACH to match tags in the JSON array
+            tag_conditions = " OR ".join(["tags LIKE ?" for _ in tag_list])
+            conditions.append(f"({tag_conditions})")
+            for tag in tag_list:
+                params.append(f'%"{tag}"%')
+
+    if min_confidence is not None:
+        conditions.append("confidence >= ?")
+        params.append(min_confidence)
+
+    if since:
+        conditions.append("timestamp >= ?")
+        params.append(since)
+
+    where_clause = "WHERE " + " AND ".join(conditions)
+
+    # Query unflagged messages from the topic DB
+    topic_conn = db.topic_conn(topic_db)
+    cursor = await topic_conn.execute(
+        f"""
+        SELECT id, agent_id, message_type, tags, confidence, timestamp, body
+        FROM messages
+        {where_clause}
+        ORDER BY timestamp DESC
+        LIMIT ?
+        """,
+        params + [limit],
+    )
+    rows = await cursor.fetchall()
+
+    if not rows:
+        return []
+
+    # Compute promotion scores
+    scorer = PromotionScorer()
+    candidates: list[PromotionCandidate] = []
+
+    # Build entity overlap map for corroboration counting
+    # Group by (entity_type, entity_value_lower) -> set of agent_ids
+    entity_sightings: dict[tuple[str, str], set[str]] = {}
+
+    # Extract entities from all message bodies and count corroboration
+    for row in rows:
+        body = row["body"] or ""
+        tags_json = row["tags"] or "[]"
+        try:
+            msg_tags = json.loads(tags_json)
+        except (json.JSONDecodeError, TypeError):
+            msg_tags = []
+
+        entities = extract(body, tags=msg_tags)
+        for entity in entities:
+            key = (entity.type, entity.value.lower())
+            entity_sightings.setdefault(key, set()).add(row["agent_id"])
+
+    # Score each message
+    for row in rows:
+        body = row["body"] or ""
+        tags_json = row["tags"] or "[]"
+        try:
+            msg_tags = json.loads(tags_json)
+        except (json.JSONDecodeError, TypeError):
+            msg_tags = []
+
+        # Extract entities for density count
+        entities = extract(body, tags=msg_tags)
+        entity_count = len(entities)
+
+        # Count corroborating agents (distinct agents sharing at least one entity)
+        corroboration_count = 0
+        for entity in entities:
+            key = (entity.type, entity.value.lower())
+            if key in entity_sightings:
+                # Exclude this message's own agent from the count
+                other_agents = entity_sightings[key] - {row["agent_id"]}
+                corroboration_count = max(corroboration_count, len(other_agents))
+
+        # Build message dict for scorer
+        message_dict = {
+            "confidence": row["confidence"],
+            "tags": msg_tags,
+            "timestamp": row["timestamp"],
+        }
+
+        score, breakdown = scorer.score(message_dict, corroboration_count, entity_count)
+
+        candidates.append(
+            PromotionCandidate(
+                id=row["id"],
+                topic_db=topic_db,
+                agent_id=row["agent_id"],
+                message_type=row["message_type"],
+                tags=msg_tags,
+                confidence=row["confidence"],
+                timestamp=row["timestamp"],
+                body=body,
+                promotion_score=score,
+                score_breakdown=ScoreBreakdownResponse(
+                    confidence_component=breakdown.confidence_component,
+                    corroboration_component=breakdown.corroboration_component,
+                    entity_density_component=breakdown.entity_density_component,
+                    age_component=breakdown.age_component,
+                    tag_component=breakdown.tag_component,
+                ),
+            )
+        )
+
+    # Sort by promotion score descending
+    candidates.sort(key=lambda x: x.promotion_score, reverse=True)
+
+    return candidates
 
 
 @router.get(

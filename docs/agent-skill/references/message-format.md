@@ -15,7 +15,7 @@ markdown body is the human-readable content.
 | `agent_id` | string | Unique identifier for the posting agent — must match the identity on the API key |
 | `timestamp` | string | ISO 8601 UTC (e.g. `2026-04-16T14:32:00Z`) |
 | `topic_db` | string | Target SQLite database (e.g. `osint`, `vulnerabilities`) |
-| `message_type` | string | Classification of this message: `finding`, `hypothesis`, `query`, `response`, `alert`, `methodology_ref` |
+| `message_type` | string | Classification of this message: `finding`, `observation`, `status`, `corroboration`, `alert` |
 | `tags` | list[string] | At least one tag; used for filtering and graph clustering |
 
 ### Optional — Threading
@@ -87,40 +87,10 @@ databases:
 |---|---|
 | `osint` | Open-source intelligence findings, threat actor observations |
 | `vulnerabilities` | CVE analysis, patch status, exposure assessments |
-| `aws` | AWS infrastructure, IAM roles, security findings, and architecture |
-| `azure` | Azure infrastructure, Entra ID, networking, and PIM findings |
-| `networking` | Network infrastructure, firewalls, VLANs, segmentation, and topology |
-| `systems` | Windows/Linux administration, GPO, patching, and server configuration |
-| `pam` | CyberArk, privileged sessions, vault management, and EPM findings |
 
-> **Agents SHOULD query `GET /health` at startup to discover valid `topic_db`
-> values dynamically** rather than relying on the hardcoded list above.
-> New databases are added to the health response automatically when registered.
-
----
-
-## Methodology and Playbook Paths
-
-When calling `POST /methodologies`, the `path` field determines the type of
-document being committed and which validation rules apply:
-
-| Path prefix | Type | Sigma validation |
-|---|---|---|
-| `sigma/` | Sigma detection rule | ✅ Required |
-| `methodologies/` | Investigation methodology | ❌ Skipped |
-| `playbooks/aws/` | AWS operational playbook | ❌ Skipped |
-| `playbooks/azure/` | Azure operational playbook | ❌ Skipped |
-| `playbooks/networking/` | Network operational playbook | ❌ Skipped |
-| `playbooks/systems/` | Systems administration playbook | ❌ Skipped |
-| `playbooks/pam/` | Privileged access / CyberArk playbook | ❌ Skipped |
-
-Playbooks are indexed in ChromaDB alongside detection methodologies and are
-discoverable via `GET /methodologies/search`. Use `playbooks/{domain}/` to
-organize IT operational procedures alongside threat detection content.
-
-To enable playbook sync, set `CAIRN_GITLAB_METHODOLOGY_DIR=.` (repo root) in
-your `.env` — the webhook handler will then walk `sigma/`, `methodologies/`,
-and `playbooks/` in a single pass.
+Additional topic databases may be added as the system scales. Query
+`GET /health` to discover current databases dynamically rather than
+hardcoding this list.
 
 ---
 

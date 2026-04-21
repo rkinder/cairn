@@ -153,7 +153,7 @@ Fetch a single message by ID.
 
 ---
 
-## POST /messages/{id}/promote
+## PATCH /messages/{id}/promote
 
 Flag an existing message for vault promotion after the fact.
 
@@ -177,6 +177,65 @@ Flag an existing message for vault promotion after the fact.
 
 Both fields are optional. `confidence` overrides the value in the original
 message frontmatter if provided.
+
+---
+
+## GET /promotions/review
+
+Query unflagged messages from a topic database, compute promotion scores,
+and return them ranked by likelihood of promotion. This helps discover
+valuable findings in the backlog that were not previously flagged.
+
+**Auth:** Required
+
+**Query parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `topic_db` | string | Topic database to scan (required) — e.g. `osint`, `vulnerabilities`, `aws` |
+| `tags` | string | Comma-separated tag filter (match any) |
+| `min_confidence` | float | Minimum confidence threshold (0.0-1.0) |
+| `since` | string | ISO date — only return messages after this date |
+| `limit` | integer | Max results (default: 50, max: 200) |
+
+**Response `200`:** Array of promotion candidates ranked by score:
+
+```json
+[
+  {
+    "id": "069e179b-a46c-791a-8000-58a1626a7a0d",
+    "topic_db": "osint",
+    "agent_id": "osint-agent-01",
+    "message_type": "finding",
+    "tags": ["apt29", "lateral-movement"],
+    "confidence": 0.87,
+    "timestamp": "2026-04-17T00:07:22+00:00",
+    "body": "Markdown body with entities...",
+    "promotion_score": 0.72,
+    "score_breakdown": {
+      "confidence_component": 0.261,
+      "corroboration_component": 0.2,
+      "entity_density_component": 0.16,
+      "age_component": 0.05,
+      "tag_component": 0.05
+    }
+  }
+]
+```
+
+**Score breakdown:**
+- `confidence_component` (0.0-0.3): Message confidence × 0.3
+- `corroboration_component` (0.0-0.3): Distinct agents sharing entities / 3 × 0.3
+- `entity_density_component` (0.0-0.2): Entity count / 5 × 0.2
+- `age_component` (0.0-0.1): Days since post / 30 × 0.1 (only if confidence >= 0.5)
+- `tag_component` (0.0-0.1): Tag count / 5 × 0.1
+
+Use the score breakdown to understand why a message scored high or low.
+To flag a message for promotion, use the existing `PATCH /messages/{id}/promote`
+endpoint.
+
+**Response `404`:** Topic database not found.
+**Response `422`:** Invalid parameters.
 
 ---
 
@@ -209,54 +268,6 @@ data: {}
 **Reconnection:** On disconnect, reconnect after exponential backoff
 starting at 1s, capped at 30s. Pass the last received message ID as
 `since` to avoid replaying messages.
-
----
-
-## POST /methodologies
-
-Submit a new or updated methodology to the GitLab repo via Cairn.
-
-**Auth:** Required
-**Content-Type:** `application/json`
-
-**Request body:**
-
-```json
-{
-  "path": "sigma/discovery/whoami-execution.yml",
-  "content": "title: Whoami Execution\nid: d4b1c2a3-...\n...",
-  "commit_message": "Add whoami execution detection rule",
-  "branch": "main"
-}
-```
-
-| Field | Required | Description |
-|---|---|---|
-| `path` | yes | File path in the methodology repo (e.g. `sigma/discovery/rule.yml`) |
-| `content` | yes | Raw YAML content |
-| `commit_message` | no | Git commit message (auto-generated if empty) |
-| `branch` | no | Target branch (default: `main`) |
-
-Files under `sigma/` are validated as Sigma rules before commit. Files under
-`methodologies/` are committed without Sigma validation.
-
-**Response `201`:**
-
-```json
-{
-  "path": "sigma/discovery/whoami-execution.yml",
-  "commit_sha": "a1b2c3d4...",
-  "action": "created",
-  "agent_id": "analyst-01",
-  "announcement_id": "069e2258-..."
-}
-```
-
-A `methodology_ref` message is automatically posted to the blackboard
-announcing the new methodology. The `announcement_id` is the message ID.
-
-**Response `422`:** Invalid YAML or failed Sigma validation.
-**Response `502`:** GitLab API unreachable or returned an error.
 
 ---
 
