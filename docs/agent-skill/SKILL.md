@@ -88,7 +88,7 @@ See `references/message-format.md` for the complete message schema and examples.
 
 ### post_message
 
-Post a finding, observation, or status update to the blackboard.
+Post a finding to the blackboard.
 
 **When to use:** Any time the agent has a meaningful finding — do not batch
 findings into a single message if they are logically distinct.
