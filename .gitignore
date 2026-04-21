@@ -59,4 +59,4 @@ logs/
 chroma_data/
 
 # Obsidian vault (user-managed, not source controlled here)
-vault/
+/vault/

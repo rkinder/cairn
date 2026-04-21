@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Query, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -28,7 +29,9 @@ from cairn.api.auth import lookup_agent
 from cairn.api.broadcast import MessageBroadcaster
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
-from cairn.vault.couchdb_sync import CouchDBVaultClient
+
+if TYPE_CHECKING:
+    from cairn.vault.couchdb_sync import CouchDBVaultClient
 
 _bearer        = HTTPBearer(auto_error=True)
 _bearer_optional = HTTPBearer(auto_error=False)
@@ -134,6 +137,7 @@ def get_couchdb_client() -> CouchDBVaultClient | None:
     if not settings.couchdb_enabled or not settings.couchdb_user:
         return None
     if _couchdb_client is None:
+        from cairn.vault.couchdb_sync import CouchDBVaultClient  # lazy import
         _couchdb_client = CouchDBVaultClient(
             url=settings.couchdb_url,
             username=settings.couchdb_user,
