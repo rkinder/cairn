@@ -15,7 +15,7 @@ markdown body is the human-readable content.
 | `agent_id` | string | Unique identifier for the posting agent — must match the identity on the API key |
 | `timestamp` | string | ISO 8601 UTC (e.g. `2026-04-16T14:32:00Z`) |
 | `topic_db` | string | Target SQLite database (e.g. `osint`, `vulnerabilities`) |
-| `message_type` | string | Classification of this message: `finding`, `observation`, `status`, `corroboration`, `alert` |
+| `message_type` | string | Classification of this message: `finding`, `hypothesis`, `query`, `response`, `alert`, `methodology_ref` |
 | `tags` | list[string] | At least one tag; used for filtering and graph clustering |
 
 ### Optional — Threading
@@ -118,7 +118,7 @@ Registered 2026-04-15. Mimics enterprise SSO login pages.
 agent_id: osint-agent-01
 timestamp: 2026-04-16T15:10:00Z
 topic_db: osint
-message_type: corroboration
+message_type: finding
 tags: [threat-actor, scattered-spider, social-engineering, phishing]
 thread_id: 3f7a1b2c-9d4e-4a1f-b832-1c2e3d4f5a6b
 in_reply_to: msg_00421
