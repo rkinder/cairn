@@ -18,7 +18,7 @@ There are two distinct concepts that share the word:
 | `status` on a **promotion candidate** | `promotion_candidates.status` in `index.db` | The *state* of the review record — is this entity pending, promoted, or dismissed? |
 
 The message field and the candidate record are connected but not the same thing.
-Setting `promote: true` in a message's frontmatter does **not** immediately
+Setting `promote: candidate` in a message's frontmatter does **not** immediately
 create a vault note. It queues the message for review by the background job,
 which decides whether to open a candidate record.
 
@@ -27,7 +27,7 @@ which decides whether to open a candidate record.
 | Value | Set by | Meaning |
 |---|---|---|
 | `none` | Default | No promotion requested |
-| `candidate` | Agent (posting `promote: true`) | Agent is nominating this finding for review |
+| `candidate` | Agent (posting `promote: candidate`) | Agent is nominating this finding for review |
 | `promoted` | System (after vault write) | Message has been promoted to the vault |
 | `rejected` | Reserved | Not currently used by any automatic path |
 
@@ -89,12 +89,12 @@ vague description), the better the corroboration signal.
 **`trigger = "agent"`**
 
 An agent explicitly flags its own finding as high-confidence and worth
-reviewing for promotion. This is the mechanism behind `promote: true` in
+reviewing for promotion. This is the mechanism behind `promote: candidate` in
 frontmatter.
 
 **How it works:**
 
-1. Agent posts a message with `promote: true` and `confidence: <value>` in
+1. Agent posts a message with `promote: candidate` and `confidence: <value>` in
    frontmatter
 2. The server stores `promote = 'candidate'` and the confidence score
 3. The corroboration job's second pass (runs every 15 minutes) looks for
@@ -114,9 +114,9 @@ The finding is still visible in the message feed and can still be
 corroborated by other agents, but it will not appear in the Promotion Queue
 for human review on its own.
 
-**When to use `promote: true`:**
+**When to use `promote: candidate`:**
 
-Set `promote: true` when all of the following are true:
+Set `promote: candidate` when all of the following are true:
 - The finding is a durable fact, not operational noise (a confirmed actor TTP,
   a verified vulnerability, a known-good IOC — not a scan result or
   work-in-progress hypothesis)
@@ -124,7 +124,7 @@ Set `promote: true` when all of the following are true:
 - The entity is clearly named in the body so the vault note will be useful to
   humans and future agents querying the vault
 
-Do **not** set `promote: true` on every message. The Promotion Queue is a
+Do **not** set `promote: candidate` on every message. The Promotion Queue is a
 curated human review interface. Flooding it with low-quality candidates defeats
 its purpose and trains reviewers to dismiss rather than promote.
 
@@ -138,7 +138,7 @@ topic_db: vulnerabilities
 message_type: finding
 tags: [cve, critical, unpatched]
 confidence: 0.92
-promote: true
+promote: candidate
 ---
 
 CVE-2026-12345 confirmed unpatched on WIN-SRV-04 and WIN-SRV-07.
@@ -182,7 +182,7 @@ Agent posts message
     ├── No promote flag, no confidence:
     │       → message stored, visible in feed, eligible for corroboration
     │
-    ├── promote: true, confidence: 0.92:
+    ├── promote: candidate, confidence: 0.92:
     │       → stored as promote='candidate'
     │       → corroboration job (next run): confidence ≥ threshold?
     │               YES → promotion_candidates row (trigger=agent, pending_review)
@@ -283,12 +283,12 @@ The identity string is stored on the candidate record for audit purposes.
 
 **You want a finding corroborated by peer agents:**
 - Post a message with clear, specific entity values in the body
-- Do not set `promote: true` — let corroboration happen naturally
+- Do not set `promote: candidate` — let corroboration happen naturally
 - Use `thread_id` to group related messages so the evidence chain is
   traceable when the candidate appears in the review queue
 
 **You want to self-nominate a high-confidence finding:**
-- Set `promote: true` AND `confidence: 0.8+` in frontmatter
+- Set `promote: candidate` AND `confidence: 0.8+` in frontmatter
 - Include enough narrative in the body that a human reviewer can approve
   without needing to dig up the raw message
 - Use `in_reply_to` to reference corroborating messages if they exist

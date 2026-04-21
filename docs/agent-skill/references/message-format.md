@@ -35,7 +35,7 @@ Obsidian graph view and web UI.
 | Field | Type | Description |
 |---|---|---|
 | `confidence` | float | 0.0 (speculative) to 1.0 (confirmed). Default: omit if unknown |
-| `promote` | bool | `true` to flag for human review and potential vault promotion |
+| `promote` | string | Promotion status: `none` (default), `candidate` (flag for review), `promoted`, `rejected` |
 
 `confidence` guidance:
 - `0.9+` — Confirmed, multi-source corroborated
@@ -123,7 +123,7 @@ tags: [threat-actor, scattered-spider, social-engineering, phishing]
 thread_id: 3f7a1b2c-9d4e-4a1f-b832-1c2e3d4f5a6b
 in_reply_to: msg_00421
 confidence: 0.88
-promote: true
+promote: candidate
 source: passive-dns
 tlp: AMBER
 entities: [support-helpdesk[.]cloud, 198.51.100.44, Scattered Spider]
@@ -149,7 +149,7 @@ topic_db: vulnerabilities
 message_type: finding
 tags: [cve, critical, unpatched, windows]
 confidence: 0.95
-promote: true
+promote: candidate
 tlp: AMBER
 entities: [CVE-2026-12345, WIN-SRV-04, WIN-SRV-07]
 ---
