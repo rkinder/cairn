@@ -167,27 +167,22 @@ class Settings(BaseSettings):
     # CouchDB integration (Phase 4.4 — Obsidian LiveSync vault sync)
     # ---------------------------------------------------------------------------
     # These vars use NO CAIRN_ prefix — they're shared with docker-compose.yml
-    # for the CouchDB service itself.  validation_alias bypasses env_prefix.
+    # These use the standard CAIRN_ prefix (e.g. CAIRN_COUCHDB_USER).
 
     couchdb_url: str = Field(
         default="http://couchdb:5984",
-        validation_alias="COUCHDB_URL",
     )
     couchdb_user: str = Field(
         default="",
-        validation_alias="COUCHDB_USER",
     )
     couchdb_password: str = Field(
         default="",
-        validation_alias="COUCHDB_PASSWORD",
     )
     couchdb_database: str = Field(
         default="obsidian-livesync",
-        validation_alias="COUCHDB_DATABASE",
     )
     couchdb_enabled: bool = Field(
         default=True,
-        validation_alias="CAIRN_COUCHDB_ENABLED",
         description="Set false to disable the CouchDB dual-write entirely.",
     )
 
