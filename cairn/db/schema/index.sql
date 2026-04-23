@@ -2,12 +2,13 @@
 -- All agents hit this database first to discover topic databases
 -- and to perform cross-domain queries without touching topic DBs directly.
 --
--- Schema version: 4
+-- Schema version: 5
 -- Migration strategy: bump _schema_meta 'schema_version' and add
 --   a corresponding migration in cairn/db/migrations/.
 -- v1 → v2: added methodology_executions table (Phase 3).
 -- v2 → v3: added promotion_candidates table (Phase 4).
 -- v3 → v4: added entity_domain column to promotion_candidates (Phase 4.2).
+-- v4 → v5: added topic_db column to promotion_candidates (Bug 002 fix).
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -23,7 +24,7 @@ CREATE TABLE IF NOT EXISTS _schema_meta (
 );
 
 INSERT OR IGNORE INTO _schema_meta (key, value) VALUES
-    ('schema_version', '4'),
+    ('schema_version', '5'),
     ('domain',         'index');
 
 
@@ -173,6 +174,9 @@ CREATE TABLE IF NOT EXISTS promotion_candidates (
     entity_domain       TEXT,                   -- IT domain hint from entity extractor (Phase 4.2)
                                                 -- NULL for cybersecurity entities; 'aws' | 'azure' |
                                                 -- 'networking' | 'systems' | 'pam' for IT entities
+    topic_db            TEXT,                   -- slug of the primary topic DB (Bug 002 fix)
+                                                -- e.g. 'osint', 'vulnerabilities', 'aws'
+                                                -- NULL for candidates created before this migration
     trigger             TEXT NOT NULL
                             CHECK (trigger IN ('corroboration', 'human', 'agent')),
     status              TEXT NOT NULL DEFAULT 'pending_review'

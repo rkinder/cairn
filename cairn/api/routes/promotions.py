@@ -73,6 +73,7 @@ class CandidateResponse(BaseModel):
     id: str
     entity: str
     entity_type: str
+    topic_db: str | None
     trigger: str
     status: str
     confidence: float | None
@@ -163,7 +164,7 @@ async def list_candidates(
 
     cursor = await db.index_conn.execute(
         f"""
-        SELECT id, entity, entity_type, trigger, status, confidence,
+        SELECT id, entity, entity_type, topic_db, trigger, status, confidence,
                source_message_ids, narrative, reviewer_id, vault_path,
                created_at, updated_at
         FROM promotion_candidates
@@ -364,7 +365,7 @@ async def get_candidate(
 ) -> CandidateResponse:
     cursor = await db.index_conn.execute(
         """
-        SELECT id, entity, entity_type, trigger, status, confidence,
+        SELECT id, entity, entity_type, topic_db, trigger, status, confidence,
                source_message_ids, narrative, reviewer_id, vault_path,
                created_at, updated_at
         FROM promotion_candidates
@@ -569,7 +570,7 @@ def _require_human(x_human_reviewer: str | None, x_reviewer_identity: str | None
 async def _fetch_candidate(db: DatabaseManager, candidate_id: str) -> CandidateResponse:
     cursor = await db.index_conn.execute(
         """
-        SELECT id, entity, entity_type, trigger, status, confidence,
+        SELECT id, entity, entity_type, topic_db, trigger, status, confidence,
                source_message_ids, narrative, reviewer_id, vault_path,
                created_at, updated_at
         FROM promotion_candidates WHERE id = ?
@@ -586,6 +587,7 @@ def _row_to_candidate(row) -> CandidateResponse:
         id=row["id"],
         entity=row["entity"],
         entity_type=row["entity_type"],
+        topic_db=row["topic_db"],
         trigger=row["trigger"],
         status=row["status"],
         confidence=row["confidence"],

@@ -17,7 +17,18 @@
       "Bash(echo \"exit: $?\")",
       "Bash(uv --version)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(docker compose *)",
+      "Bash(curl -s -H \"Authorization: Bearer cairn_QNq5iVnnezzDSHvzW9FFHgSRN1eL88HOXp8szbbfWZ4\" http://localhost:8000/promotions?status=pending_review)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"http://localhost:8000/api/spec.json\")",
+      "Bash(python3 -c \"import sys,json; spec=json.load\\(sys.stdin\\); p=spec['paths'].get\\('/messages',{}\\); print\\(json.dumps\\(p.get\\('post',{}\\).get\\('parameters',[]\\), indent=2\\)\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -X POST 'http://localhost:8000/messages?db=osint' -H 'Authorization: Bearer cairn_QNq5iVnnezzDSHvzW9FFHgSRN1eL88HOXp8szbbfWZ4' -H 'Content-Type: application/json' -d '{\"raw_content\": __CMDSUB_OUTPUT__')",
+      "Bash(curl -s -H 'Authorization: Bearer cairn_QNq5iVnnezzDSHvzW9FFHgSRN1eL88HOXp8szbbfWZ4' 'http://localhost:8000/promotions?status=pending_review')",
+      "Bash(curl -s -u 'cairn:563QXRq&kqsN4E4PLTdNnq$' http://localhost:5984/obsidian-livesync/cairn%2FHOST-DELTA.md)"
     ]
   }
 }

@@ -159,7 +159,7 @@ services:
   #
   # Setup (one-time):
   #   1. Access the CouchDB admin UI at http://localhost:5984/_utils
-  #   2. Create a database named 'obsidian-vault' (or your preferred name)
+  #   2. Create a database named 'obsidian-livesync' (default) or set COUCHDB_DATABASE in .env
   #   3. In Obsidian LiveSync settings, point to http://<host>:5984 with
   #      the credentials set here (COUCHDB_USER / COUCHDB_PASSWORD).
   # ---------------------------------------------------------------------------

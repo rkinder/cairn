@@ -111,6 +111,8 @@ async def _detect_corroboration(db: DatabaseManager, settings: Settings) -> None
     # key: (entity_type, entity_value), value: [(agent_id, message_id), ...]
     entity_domains: dict[tuple[str, str], str | None] = {}
     # key: (entity_type, entity_value), value: IT domain hint (or None)
+    entity_topic_dbs: dict[tuple[str, str], str] = {}
+    # key: (entity_type, entity_value), value: slug of first topic DB containing this entity
 
     # Group messages by topic DB id so we can open each connection once
     topic_db_id_map: dict[str, str] = {}  # topic_db_id → slug
@@ -150,6 +152,8 @@ async def _detect_corroboration(db: DatabaseManager, settings: Settings) -> None
             # Track the domain hint for this entity key (first sighting wins)
             if key not in entity_domains:
                 entity_domains[key] = entity.domain
+            if key not in entity_topic_dbs:
+                entity_topic_dbs[key] = slug
 
     # Identify entities seen by ≥ N distinct agents
     n_threshold = settings.corroboration_n
@@ -174,6 +178,7 @@ async def _detect_corroboration(db: DatabaseManager, settings: Settings) -> None
             entity=canonical_value,
             entity_type=entity_type,
             entity_domain=entity_domains.get((entity_type, entity_value_lower)),
+            topic_db=entity_topic_dbs.get((entity_type, entity_value_lower)),
             trigger="corroboration",
             confidence=None,
             source_message_ids=source_ids,
@@ -198,7 +203,7 @@ async def _detect_self_nominations(db: DatabaseManager, settings: Settings) -> N
 
     cursor = await conn.execute(
         """
-        SELECT id, agent_id, confidence, tags
+        SELECT id, agent_id, confidence, tags, topic_db_id
         FROM message_index
         WHERE promote = 'candidate'
           AND confidence >= ?
@@ -207,6 +212,9 @@ async def _detect_self_nominations(db: DatabaseManager, settings: Settings) -> N
         (threshold,),
     )
     rows = await cursor.fetchall()
+
+    td_cursor = await conn.execute("SELECT id, name FROM topic_databases")
+    topic_id_to_slug = {r["id"]: r["name"] for r in await td_cursor.fetchall()}
 
     for row in rows:
         msg_id    = row["id"]
@@ -231,6 +239,7 @@ async def _detect_self_nominations(db: DatabaseManager, settings: Settings) -> N
             conn,
             entity=entity,
             entity_type=entity_type,
+            topic_db=topic_id_to_slug.get(row["topic_db_id"]),
             trigger="agent",
             confidence=confidence,
             source_message_ids=[msg_id],
@@ -272,6 +281,7 @@ async def _create_candidate(
     entity: str,
     entity_type: str,
     entity_domain: str | None = None,
+    topic_db: str | None = None,
     trigger: str,
     confidence: float | None,
     source_message_ids: list[str],
@@ -289,15 +299,16 @@ async def _create_candidate(
     await conn.execute(
         """
         INSERT INTO promotion_candidates
-            (id, entity, entity_type, entity_domain, trigger, status, confidence,
+            (id, entity, entity_type, entity_domain, topic_db, trigger, status, confidence,
              source_message_ids, narrative, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'pending_review', ?, ?, '', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?, '', ?, ?)
         """,
         (
             candidate_id,
             entity,
             entity_type,
             entity_domain,
+            topic_db,
             trigger,
             confidence,
             json.dumps(source_message_ids),

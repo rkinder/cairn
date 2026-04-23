@@ -475,6 +475,71 @@ function renderPromotionList() {
   list.appendChild(frag);
 }
 
+
+// ---------------------------------------------------------------------------
+// Promotion candidate source message display (Bug 002 fix)
+// ---------------------------------------------------------------------------
+
+async function loadPromoSourceMessages(cand) {
+  if (!cand.topic_db || !cand.source_message_ids?.length) {
+    renderPromoDetailPanel(cand, []);
+    return;
+  }
+
+  const findings = [];
+  for (const msgId of cand.source_message_ids) {
+    try {
+      const msg = await apiFetch(`/messages/${msgId}?db=${encodeURIComponent(cand.topic_db)}`);
+      findings.push(msg);
+    } catch {
+      // Missing or inaccessible message — skip silently
+    }
+  }
+  renderPromoDetailPanel(cand, findings);
+}
+
+function renderPromoDetailPanel(cand, findings) {
+  document.getElementById('detail-placeholder').classList.add('hidden');
+  const content = document.getElementById('detail-content');
+  content.classList.remove('hidden');
+
+  const confText = cand.confidence != null ? ` &bull; conf ${Math.round(cand.confidence * 100)}%` : '';
+
+  document.getElementById('detail-meta').innerHTML = `
+    <strong>${escapeHtml(cand.entity)}</strong>
+    <span class="badge badge-type-${CSS.escape(cand.entity_type)}">${escapeHtml(cand.entity_type)}</span>
+    <span class="badge badge-db">${escapeHtml(cand.topic_db || 'unknown')}</span>
+    <span class="promo-trigger">${escapeHtml(cand.trigger)}</span>
+    <span style="color:var(--text-muted);font-size:.75rem"${confText}</span>
+    <span style="color:var(--text-muted);font-size:.72rem;margin-left:auto">${new Date(cand.created_at).toLocaleString()}</span>
+  `;
+
+  document.getElementById('detail-tags').innerHTML = '';
+
+  if (!findings.length) {
+    const noSrc = cand.source_message_ids?.length
+      ? '<p style="color:var(--text-muted);font-size:.85rem">Source messages could not be loaded.</p>'
+      : '<p style="color:var(--text-muted);font-size:.85rem">No source messages attached to this candidate.</p>';
+    document.getElementById('detail-body').innerHTML = noSrc;
+    document.getElementById('detail-frontmatter').textContent = JSON.stringify({
+      id: cand.id, entity: cand.entity, trigger: cand.trigger, status: cand.status,
+      source_message_ids: cand.source_message_ids,
+    }, null, 2);
+    return;
+  }
+
+  const bodyParts = findings.map(msg => {
+    const ts = new Date(msg.timestamp).toLocaleString();
+    const header = `**${msg.agent_id}** &mdash; ${ts}`;
+    return `<div class="promo-finding-item"><div class="promo-finding-meta">${header}</div><div class="markdown-body">${marked.parse(msg.body || '')}</div></div>`;
+  });
+  document.getElementById('detail-body').innerHTML = bodyParts.join('');
+  document.getElementById('detail-frontmatter').textContent = JSON.stringify({
+    id: cand.id, entity: cand.entity, trigger: cand.trigger, status: cand.status,
+    source_message_ids: cand.source_message_ids,
+  }, null, 2);
+}
+
 function buildPromoCard(cand) {
   const card = document.createElement('div');
   card.className = `promo-card status-${cand.status}`;
@@ -520,9 +585,11 @@ function buildPromoCard(cand) {
   // Toggle expand/collapse
   card.querySelector('.promo-card-header').addEventListener('click', () => {
     card.classList.toggle('expanded');
-    // Show reviewer bar when opening a pending card
-    if (card.classList.contains('expanded') && isPending) {
-      document.getElementById('reviewer-bar').classList.remove('hidden');
+    if (card.classList.contains('expanded')) {
+      // Show reviewer bar when opening a pending card
+      if (isPending) document.getElementById('reviewer-bar').classList.remove('hidden');
+      // Load source message bodies into the detail panel
+      loadPromoSourceMessages(cand);
     }
   });
 

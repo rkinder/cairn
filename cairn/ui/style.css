@@ -900,3 +900,16 @@ select.filter-input {
   color: var(--promote-promoted);
   font-family: "SFMono-Regular", Consolas, monospace;
 }
+
+.promo-finding-item {
+  border-top: 1px solid var(--border);
+  padding-top: .75rem;
+  margin-top: .75rem;
+}
+.promo-finding-item:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+
+.promo-finding-meta {
+  font-size: .75rem;
+  color: var(--text-muted);
+  margin-bottom: .4rem;
+}
