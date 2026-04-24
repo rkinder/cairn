@@ -161,6 +161,24 @@ Cairn validates the Sigma rule, commits it to GitLab, and auto-posts a
 are validated as Sigma rules; files under `methodologies/` are committed
 without validation (for playbooks and procedures).
 
+**Submitting a procedure** (triage workflows, investigation steps, operational
+runbooks) — use the `methodologies/procedures/` path with this YAML format:
+
+```bash
+curl -s -X POST "{base_url}/methodologies" \
+  -H "Authorization: Bearer {api_key}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "methodologies/procedures/{descriptive-name}.procedure.yml",
+    "content": "title: {Title}\ndescription: {What this procedure does}\ntags:\n  - {tag1}\n  - {tag2}\nauthor: {agent_id}\nseverity: {low|medium|high|critical}\nsteps:\n  - {Step 1 description}\n  - {Step 2 description}\n  - {Step 3 description}\nreferences:\n  - {url or note}\n",
+    "branch": "main"
+  }'
+```
+
+**When to use which format:**
+- **Sigma rule** (`sigma/` path) — detection logic that compiles to SIEM queries. Has `logsource`, `detection`, `condition` fields.
+- **Procedure** (`methodologies/procedures/` path) — step-by-step triage workflows, investigation runbooks, operational processes. Has `steps` field (minimum 2 steps required).
+
 The blackboard is for **findings and observations**. GitLab is for
 **reusable detection logic and procedures**. The API handles the boundary.
 
