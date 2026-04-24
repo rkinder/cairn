@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 import chromadb
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -46,9 +46,11 @@ from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
 from cairn.jobs.promotion_scorer import PromotionScorer
 from cairn.nlp.entity_extractor import extract
+from cairn.sync.chroma_sync import _procedure_doc_id
 from cairn.sync.vault_sync import get_vault_collection, upsert_vault_note
 from cairn.vault.wikilink_resolver import WikilinkResolver
-from cairn.vault.writer import WriteResult, write_note
+from cairn.vault.writer import WriteResult, write_note, write_procedure
+from cairn.nlp.step_extractor import extract_steps
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/promotions", tags=["promotions"])
@@ -89,6 +91,10 @@ class PromoteRequest(BaseModel):
     narrative: str | None = Field(
         default=None,
         description="Optional narrative override for the vault note ## Summary section.",
+    )
+    methodology_kind: Literal["sigma", "procedure"] | None = Field(
+        default=None,
+        description="Optional methodology kind. Use 'procedure' to promote a procedural note.",
     )
 
 
@@ -432,19 +438,36 @@ async def promote_candidate(
     # Write to vault (disk first, then best-effort CouchDB sync — Phase 4.4)
     couchdb_client = get_couchdb_client()
     try:
-        write_result: WriteResult = await write_note(
-            settings.vault_path,
-            entity=entity,
-            entity_type=entity_type,
-            narrative=narrative,
-            source_message_ids=source_ids,
-            confidence=confidence,
-            promoted_at=now_iso,
-            related_links=related_links,
-            domain=entity_domain,
-            couchdb_client=couchdb_client,
-            source_findings=source_findings,
-        )
+        if body.methodology_kind == "procedure":
+            steps = extract_steps(narrative)
+            low_conf = len(steps) < 2
+            write_result = await write_procedure(
+                settings.vault_path,
+                title=entity[:60],
+                steps=steps,
+                tags=[],
+                narrative=narrative,
+                source_message_ids=source_ids,
+                promoted_at=now_iso,
+                author=reviewer_id,
+                severity=None,
+                low_confidence=low_conf,
+                couchdb_client=couchdb_client,
+            )
+        else:
+            write_result = await write_note(
+                settings.vault_path,
+                entity=entity,
+                entity_type=entity_type,
+                narrative=narrative,
+                source_message_ids=source_ids,
+                confidence=confidence,
+                promoted_at=now_iso,
+                related_links=related_links,
+                domain=entity_domain,
+                couchdb_client=couchdb_client,
+                source_findings=source_findings,
+            )
     except Exception as exc:
         logger.exception("promote_candidate: vault write failed for %s", candidate_id)
         raise HTTPException(
@@ -467,15 +490,29 @@ async def promote_candidate(
     try:
         chroma = chromadb.HttpClient(host=settings.chroma_host, port=settings.chroma_port)
         vault_col = get_vault_collection(chroma, settings.vault_collection)
-        upsert_vault_note(
-            vault_col,
-            vault_path=vault_rel,
-            title=entity,
-            summary=narrative[:500] if narrative else "",
-            entity_type=entity_type,
-            confidence=confidence,
-            promoted_at=now_iso,
-        )
+        if body.methodology_kind == "procedure":
+            steps = extract_steps(narrative)
+            doc_id = _procedure_doc_id(entity[:60], vault_rel)
+            document = "\n".join([entity, narrative] + [f"{i+1}. {s}" for i, s in enumerate(steps)])
+            metadata = {
+                "kind": "procedure",
+                "title": entity[:60],
+                "tags": "",
+                "vault_path": vault_rel,
+                "source_message_ids": ",".join(source_ids),
+                "promoted_at": now_iso,
+            }
+            vault_col.upsert(ids=[doc_id], documents=[document], metadatas=[metadata])
+        else:
+            upsert_vault_note(
+                vault_col,
+                vault_path=vault_rel,
+                title=entity,
+                summary=narrative[:500] if narrative else "",
+                entity_type=entity_type,
+                confidence=confidence,
+                promoted_at=now_iso,
+            )
     except Exception:
         logger.warning("promote_candidate: ChromaDB sync failed (non-fatal) for %s", candidate_id)
 

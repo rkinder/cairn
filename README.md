@@ -514,6 +514,7 @@ All variables use the `CAIRN_` prefix. See `.env.example` for the full list.
 | `CAIRN_CHROMA_HOST` | `chromadb` | ChromaDB HTTP server hostname |
 | `CAIRN_CHROMA_PORT` | `8000` | ChromaDB HTTP server port |
 | `CAIRN_CHROMA_COLLECTION` | `methodologies` | ChromaDB collection name |
+| `CAIRN_SPACY_ENABLED` | `false` | Enable optional spaCy sentence-boundary fallback in `extract_steps()` |
 
 ---
 
@@ -580,6 +581,15 @@ cairn-admin db deactivate network
 - `BlackboardClient.find_vault_note()` — agents check for prior curated knowledge before investigating
 - CouchDB service + Obsidian LiveSync support for multi-device vault access
 - `promotion_candidates` table in `index.db` (schema v3, migration 002)
+
+### Phase 4.5 — Procedural Methodology Ingestion ✅
+- Procedure methodology ingest + search parity with Sigma through `kind` metadata
+- Route A integration tests validating procedure sync + `kind=procedure` search behavior
+- Route C end-to-end coverage for procedure/sigma promote request pathways
+- Skill client `find_methodology(..., kind=...)` support with `MethodologyRef.kind`
+- Optional spaCy-gated sentence boundary fallback in step extraction (`CAIRN_SPACY_ENABLED`, default `false`)
+- Performance-marked tests for procedure sync/search budgets
+- Phase docs: `docs/phase4.5.md`
 
 ### Phase 5 — Scale and Hardening 🔜
 - Migrate SQLite topic databases to PostgreSQL

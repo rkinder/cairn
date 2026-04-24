@@ -38,7 +38,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -91,6 +91,7 @@ class MethodologySearchResult(BaseModel):
     title:       str
     tags:        list[str]
     status:      str
+    kind:        str = Field(default="sigma")
     score:       float = Field(..., ge=0.0, le=1.0, description="Similarity score [0, 1].")
 
 
@@ -287,6 +288,7 @@ async def search_methodologies_endpoint(
     _agent: Annotated[dict, Depends(authenticated_agent)],
     q: Annotated[str, Query(min_length=1, description="Natural-language search query.")],
     n: Annotated[int, Query(ge=1, le=50, description="Number of results to return.")] = 10,
+    kind: Annotated[Literal["sigma", "procedure", "any"] | None, Query(description="Optional methodology kind filter.")] = None,
 ) -> list[MethodologySearchResult]:
     settings = get_settings()
     try:
@@ -295,7 +297,8 @@ async def search_methodologies_endpoint(
 
         client     = chromadb.HttpClient(host=settings.chroma_host, port=settings.chroma_port)
         collection = get_collection(client)
-        results    = search_methodologies(collection, q, n=n)
+        where = {"kind": kind} if (kind and kind != "any") else None
+        results    = search_methodologies(collection, q, n=n, where=where)
     except Exception as exc:
         logger.exception("ChromaDB methodology search failed")
         raise HTTPException(
@@ -310,6 +313,7 @@ async def search_methodologies_endpoint(
             title=r["title"],
             tags=r["tags"],
             status=r["status"],
+            kind=r.get("kind", "sigma"),
             score=r["score"],
         )
         for r in results

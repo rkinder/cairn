@@ -1,0 +1,18 @@
+title: Phishing Email Triage Procedure
+description: Investigate suspicious phishing reports using header and intel pivots.
+tags:
+  - phishing
+  - email-security
+  - triage
+author: soc-analyst
+severity: medium
+steps:
+  - Collect full headers and validate SPF, DKIM, and DMARC alignment.
+  - Extract sender domain and resolve historical passive DNS context.
+  - Pivot on sending IP across recent inbound gateway logs.
+  - Correlate domains and IPs with threat intelligence sources.
+  - Score indicators and escalate if confidence is high.
+  - Document findings and recommended containment actions.
+references:
+  - https://owasp.org/www-project-phishing/
+  - https://attack.mitre.org/

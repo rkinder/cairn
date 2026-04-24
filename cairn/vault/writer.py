@@ -215,6 +215,114 @@ async def write_note(
     )
 
 
+async def write_procedure(
+    vault_root: Path,
+    *,
+    title: str,
+    steps: list[str],
+    tags: list[str],
+    narrative: str,
+    source_message_ids: list[str],
+    promoted_at: str,
+    author: str | None,
+    severity: str | None,
+    low_confidence: bool,
+    couchdb_client: "CouchDBVaultClient | None" = None,
+) -> WriteResult:
+    target_dir = vault_root / _CAIRN_SUBDIR / "procedures"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = _safe_filename(title)
+    note_file = target_dir / f"{safe_name}.md"
+    vault_rel = f"{_CAIRN_SUBDIR}/procedures/{safe_name}.md"
+
+    now_iso = _now_iso()
+
+    if note_file.exists():
+        _update_existing_note(
+            note_file,
+            source_message_ids=source_message_ids,
+            promoted_at=promoted_at,
+            now_iso=now_iso,
+            source_findings=None,
+        )
+    else:
+        content = _build_procedure_note(
+            title=title,
+            steps=steps,
+            tags=tags,
+            narrative=narrative,
+            source_message_ids=source_message_ids,
+            promoted_at=promoted_at,
+            author=author,
+            severity=severity,
+            low_confidence=low_confidence,
+            now_iso=now_iso,
+        )
+        note_file.write_text(content, encoding="utf-8")
+
+    couchdb_synced = False
+    couchdb_error: str | None = None
+
+    if couchdb_client is not None:
+        try:
+            stat = note_file.stat()
+            put_result = await couchdb_client.put_note(
+                vault_rel_path=vault_rel,
+                content=note_file.read_text(encoding="utf-8"),
+                ctime_ms=int(stat.st_ctime * 1000),
+                mtime_ms=int(stat.st_mtime * 1000),
+            )
+            couchdb_synced = put_result.success
+            couchdb_error = put_result.error
+        except Exception as exc:
+            logger.warning("vault/writer: CouchDB sync failed for %s: %s", vault_rel, exc)
+            couchdb_synced = False
+            couchdb_error = str(exc)
+
+    return WriteResult(vault_rel=vault_rel, couchdb_synced=couchdb_synced, couchdb_error=couchdb_error)
+
+
+def _build_procedure_note(
+    *,
+    title: str,
+    steps: list[str],
+    tags: list[str],
+    narrative: str,
+    source_message_ids: list[str],
+    promoted_at: str,
+    author: str | None,
+    severity: str | None,
+    low_confidence: bool,
+    now_iso: str,
+) -> str:
+    merged_tags = list(dict.fromkeys(["procedure", "cairn-promoted"] + (tags or [])))
+    tags_yaml = "[" + ", ".join(merged_tags) + "]"
+    sources_yaml = "\n" + "\n".join(f"  - {mid}" for mid in source_message_ids) if source_message_ids else " []"
+    steps_block = "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps)) if steps else "_No extracted steps._"
+    summary = narrative.strip() if narrative.strip() else "_No summary provided._"
+    author_line = f"author: {author}\n" if author else ""
+    severity_line = f"severity: {severity}\n" if severity else ""
+    low_conf_line = "low_confidence: true\n" if low_confidence else ""
+
+    return (
+        f"---\n"
+        f"title: {title}\n"
+        f"tags: {tags_yaml}\n"
+        f"procedure_source: blackboard\n"
+        f"{author_line}"
+        f"{severity_line}"
+        f"{low_conf_line}"
+        f"sources:{sources_yaml}\n"
+        f"promoted_at: {promoted_at}\n"
+        f"last_updated: {now_iso}\n"
+        f"---\n\n"
+        f"## Summary\n\n{summary}\n\n"
+        f"## Steps\n\n{steps_block}\n\n"
+        f"## Evidence\n\n- **{promoted_at}** — {', '.join(source_message_ids) if source_message_ids else '—'}\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
