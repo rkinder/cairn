@@ -124,8 +124,9 @@ class MethodologyRef:
     """
     path:  str          # relative path in the GitLab repo
     sha:   str          # commit SHA at which this methodology was indexed
-    title: str          # Sigma rule title
-    tags:  list[str]    # Sigma rule tags
+    title: str          # Methodology title
+    tags:  list[str]    # Methodology tags
+    kind:  str          # sigma | procedure
     score: float        # similarity score [0, 1]; higher = more relevant
 
 
@@ -414,6 +415,7 @@ class BlackboardClient:
         self,
         query: str,
         n: int = 5,
+        kind: str | None = None,
     ) -> list[MethodologyRef]:
         """Semantic methodology search via the ChromaDB-backed endpoint.
 
@@ -432,13 +434,17 @@ class BlackboardClient:
             List of MethodologyRef dataclasses ordered by descending score.
         """
         _, url = self._spec.resolve_url("search_methodologies")
-        response = await self._request("GET", url, params={"q": query, "n": n})
+        params: dict[str, Any] = {"q": query, "n": n}
+        if kind is not None:
+            params["kind"] = kind
+        response = await self._request("GET", url, params=params)
         return [
             MethodologyRef(
                 path=item["gitlab_path"],
                 sha=item["commit_sha"],
                 title=item.get("title", ""),
                 tags=item.get("tags", []),
+                kind=item.get("kind", "sigma"),
                 score=item["score"],
             )
             for item in response.json()

@@ -186,6 +186,18 @@ class Settings(BaseSettings):
         description="Set false to disable the CouchDB dual-write entirely.",
     )
 
+    # ---------------------------------------------------------------------------
+    # NLP optional features (Phase 4.5)
+    # ---------------------------------------------------------------------------
+
+    spacy_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable optional spaCy sentence-boundary fallback in step extraction. "
+            "When false, regex/stdlib heuristics are used only."
+        ),
+    )
+
     @field_validator("data_dir", mode="before")
     @classmethod
     def resolve_data_dir(cls, v: str | Path) -> Path:

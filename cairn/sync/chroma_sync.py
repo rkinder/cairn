@@ -37,10 +37,15 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import logging
+from pathlib import Path
 from typing import Any
 
 import chromadb
+import yaml
+
+from cairn.models.methodology import ProcedureMethodology
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +130,7 @@ def search_methodologies(
     collection: chromadb.Collection,
     query: str,
     n: int = 10,
+    where: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Semantic search over the methodology collection.
 
@@ -146,11 +152,15 @@ def search_methodologies(
     if count == 0:
         return []
 
-    results = collection.query(
-        query_texts=[query],
-        n_results=min(n, count),
-        include=["metadatas", "distances"],
-    )
+    query_kwargs: dict[str, Any] = {
+        "query_texts": [query],
+        "n_results": min(n, count),
+        "include": ["metadatas", "distances"],
+    }
+    if where is not None:
+        query_kwargs["where"] = where
+
+    results = collection.query(**query_kwargs)
 
     ids        = results.get("ids",        [[]])[0]
     metadatas  = results.get("metadatas",  [[]])[0]
@@ -168,13 +178,59 @@ def search_methodologies(
             "tags":        [t for t in meta.get("tags", "").split(",") if t],
             "status":      meta.get("status",      ""),
             "score":       score,
+            "kind":        meta.get("kind", "sigma"),
         })
     return output
+
+
+def sync_procedures(
+    collection: chromadb.Collection,
+    procedures_dir: Path,
+) -> tuple[int, int]:
+    if not procedures_dir.exists() or not procedures_dir.is_dir():
+        return (0, 0)
+
+    synced = 0
+    failed = 0
+
+    for procedure_file in sorted(procedures_dir.rglob("*.procedure.yml")):
+        try:
+            payload = yaml.safe_load(procedure_file.read_text(encoding="utf-8"))
+            model = ProcedureMethodology.model_validate(payload)
+            doc_id = _procedure_doc_id(model.title, str(procedure_file))
+            description = model.description or ""
+            numbered_steps = "\n".join(
+                f"{i + 1}. {step}" for i, step in enumerate(model.steps)
+            )
+            document = f"{model.title}\n\n{description}\n\n{numbered_steps}".strip()
+            metadata: dict[str, Any] = {
+                "kind": "procedure",
+                "title": model.title,
+                "tags": ",".join(model.tags),
+                "author": model.author or "",
+                "severity": model.severity or "",
+                "gitlab_path": str(procedure_file),
+                "commit_sha": "",
+                "status": "",
+            }
+            collection.upsert(ids=[doc_id], documents=[document], metadatas=[metadata])
+            synced += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("Failed to sync procedure %s: %s", procedure_file, exc)
+
+    logger.info("Synced %d procedures; %d failed", synced, failed)
+    return (synced, failed)
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _procedure_doc_id(title: str, filepath: str) -> str:
+    raw = f"{title}\x00{filepath}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
 
 def _path_to_chroma_id(path: str) -> str:
     """Derive a stable, URL-safe ChromaDB document ID from a file path."""
