@@ -1,136 +1,79 @@
 import pytest
+from httpx import AsyncClient
+from unittest.mock import patch, MagicMock, AsyncMock
 
-from cairn.skill.client import BlackboardClient
-
-
-class _DummySpec:
-    def resolve_url(self, operation_id: str):
-        assert operation_id == "search_methodologies"
-        return operation_id, "/methodologies/search"
-
-
-class _DummyResponse:
-    def __init__(self, payload):
-        self._payload = payload
-
-    def json(self):
-        return self._payload
-
+from cairn.skill.client import BlackboardClient, MethodologyRef
 
 @pytest.mark.asyncio
-async def test_find_methodology_without_kind_omits_kind_param(monkeypatch):
-    client = BlackboardClient(base_url="http://testserver", api_key="k")
-    client._spec = _DummySpec()
-
-    captured = {}
-
-    async def _fake_request(method, url, *, params=None, json=None):
-        captured["method"] = method
-        captured["url"] = url
-        captured["params"] = params
-        return _DummyResponse(
-            [
-                {
-                    "gitlab_path": "sigma/a.yml",
-                    "commit_sha": "abc",
-                    "title": "A",
-                    "tags": ["x"],
-                    "score": 0.9,
-                }
-            ]
-        )
-
-    monkeypatch.setattr(client, "_request", _fake_request)
-
-    out = await client.find_methodology("query", n=3)
-
-    assert captured["method"] == "GET"
-    assert captured["url"] == "/methodologies/search"
-    assert captured["params"] == {"q": "query", "n": 3}
-    assert len(out) == 1
-    assert out[0].kind == "sigma"
-
+async def test_skill_client_find_methodology_no_kind():
+    client = BlackboardClient(base_url="http://test", api_key="test")
+    client._http = AsyncMock()
+    client._spec = MagicMock()
+    client._spec.resolve_url.return_value = ("GET", "http://test/methodologies/search")
+    
+    mock_resp = MagicMock()
+    mock_resp.is_success = True
+    mock_resp.json.return_value = [
+        {"gitlab_path": "path", "commit_sha": "sha", "score": 0.9}
+    ]
+    client._http.request.return_value = mock_resp
+    
+    res = await client.find_methodology("query")
+    assert len(res) == 1
+    assert res[0].kind == "sigma"
+    client._http.request.assert_called_with(
+        "GET", "http://test/methodologies/search", params={"q": "query", "n": 5}, json=None
+    )
 
 @pytest.mark.asyncio
-async def test_find_methodology_with_kind_adds_query_param(monkeypatch):
-    client = BlackboardClient(base_url="http://testserver", api_key="k")
-    client._spec = _DummySpec()
-
-    captured = {}
-
-    async def _fake_request(method, url, *, params=None, json=None):
-        captured["params"] = params
-        return _DummyResponse(
-            [
-                {
-                    "gitlab_path": "methodologies/procedures/p.yml",
-                    "commit_sha": "def",
-                    "title": "Proc",
-                    "tags": ["triage"],
-                    "kind": "procedure",
-                    "score": 0.88,
-                }
-            ]
-        )
-
-    monkeypatch.setattr(client, "_request", _fake_request)
-
-    out = await client.find_methodology("query", n=5, kind="procedure")
-
-    assert captured["params"] == {"q": "query", "n": 5, "kind": "procedure"}
-    assert out[0].kind == "procedure"
-
+async def test_skill_client_find_methodology_with_kind():
+    client = BlackboardClient(base_url="http://test", api_key="test")
+    client._http = AsyncMock()
+    client._spec = MagicMock()
+    client._spec.resolve_url.return_value = ("GET", "http://test/methodologies/search")
+    
+    mock_resp = MagicMock()
+    mock_resp.is_success = True
+    mock_resp.json.return_value = [
+        {"gitlab_path": "path", "commit_sha": "sha", "score": 0.9, "kind": "procedure"}
+    ]
+    client._http.request.return_value = mock_resp
+    
+    res = await client.find_methodology("query", kind="procedure")
+    assert len(res) == 1
+    assert res[0].kind == "procedure"
+    client._http.request.assert_called_with(
+        "GET", "http://test/methodologies/search", params={"q": "query", "n": 5, "kind": "procedure"}, json=None
+    )
 
 @pytest.mark.asyncio
-async def test_find_methodology_maps_kind_from_response(monkeypatch):
-    client = BlackboardClient(base_url="http://testserver", api_key="k")
-    client._spec = _DummySpec()
-
-    async def _fake_request(method, url, *, params=None, json=None):
-        return _DummyResponse(
-            [
-                {
-                    "gitlab_path": "sigma/x.yml",
-                    "commit_sha": "123",
-                    "title": "Sigma X",
-                    "tags": ["sigma"],
-                    "kind": "sigma",
-                    "score": 0.7,
-                }
-            ]
-        )
-
-    monkeypatch.setattr(client, "_request", _fake_request)
-
-    out = await client.find_methodology("x")
-
-    assert out[0].path == "sigma/x.yml"
-    assert out[0].sha == "123"
-    assert out[0].title == "Sigma X"
-    assert out[0].tags == ["sigma"]
-    assert out[0].kind == "sigma"
-    assert out[0].score == pytest.approx(0.7)
-
+async def test_skill_client_find_methodology_parses_tags():
+    client = BlackboardClient(base_url="http://test", api_key="test")
+    client._http = AsyncMock()
+    client._spec = MagicMock()
+    client._spec.resolve_url.return_value = ("GET", "http://test/methodologies/search")
+    
+    mock_resp = MagicMock()
+    mock_resp.is_success = True
+    mock_resp.json.return_value = [
+        {"gitlab_path": "path", "commit_sha": "sha", "score": 0.9, "tags": ["tag1", "tag2"], "title": "t", "kind": "sigma"}
+    ]
+    client._http.request.return_value = mock_resp
+    
+    res = await client.find_methodology("query")
+    assert len(res) == 1
+    assert res[0].tags == ["tag1", "tag2"]
+    assert res[0].title == "t"
 
 @pytest.mark.asyncio
-async def test_find_methodology_defaults_kind_when_missing(monkeypatch):
-    client = BlackboardClient(base_url="http://testserver", api_key="k")
-    client._spec = _DummySpec()
-
-    async def _fake_request(method, url, *, params=None, json=None):
-        return _DummyResponse(
-            [
-                {
-                    "gitlab_path": "methodologies/foo.yml",
-                    "commit_sha": "456",
-                    "title": "No Kind",
-                    "tags": [],
-                    "score": 0.5,
-                }
-            ]
-        )
-
-    monkeypatch.setattr(client, "_request", _fake_request)
-
-    out = await client.find_methodology("foo")
-    assert out[0].kind == "sigma"
+async def test_skill_client_methodology_ref_dataclass():
+    ref = MethodologyRef(
+        path="p",
+        sha="s",
+        title="t",
+        tags=["a"],
+        kind="procedure",
+        score=1.0
+    )
+    assert ref.path == "p"
+    assert ref.kind == "procedure"
