@@ -30,7 +30,6 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from cairn.api.broadcast import MessageBroadcaster
-from cairn.api.deps import get_couchdb_client
 from cairn.api.routes import messages, methodologies, promotions, stream, vault, webhooks
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
@@ -96,8 +95,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     scheduler.shutdown(wait=False)
     await db.close()
-    if couchdb is not None:
-        await couchdb.close()
     logger.info("Cairn shut down cleanly.")
 
 

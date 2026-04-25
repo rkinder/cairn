@@ -51,7 +51,7 @@ Note structure
 
 Public API
 ----------
-write_note(vault_path, entity, entity_type, narrative, source_message_ids,
+write_note(kb_path, entity, entity_type, narrative, source_message_ids,
            confidence, promoted_at, tags, related_links)
     Write or update a vault note and return the relative path within the vault.
 """
@@ -65,9 +65,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from cairn.vault.couchdb_sync import CouchDBVaultClient
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -80,9 +77,7 @@ _CAIRN_SUBDIR = "cairn"
 @dataclass(frozen=True)
 class WriteResult:
     """Result of a write_note() call."""
-    vault_rel: str
-    couchdb_synced: bool
-    couchdb_error: str | None
+    kb_rel: str
 
 
 # Regex to find and update last_updated in frontmatter
@@ -111,7 +106,6 @@ async def write_note(
     tags: list[str] | None = None,
     related_links: list[str] | None = None,
     domain: str | None = None,
-    couchdb_client: "CouchDBVaultClient | None" = None,
     source_findings: list[dict] | None = None,
 ) -> WriteResult:
     """Write or update an Obsidian vault note for a promoted entity.
@@ -132,29 +126,27 @@ async def write_note(
         related_links:      Pre-resolved wikilinks for the ## Related section.
         domain:             Optional IT domain hint (Phase 4.2) — routes the
                             note into ``cairn/{domain}/`` when set.
-        couchdb_client:     Optional CouchDB client for LiveSync sync (Phase 4.4).
-                            When None, disk-only write; ``couchdb_synced`` is False.
         source_findings:    Full message bodies from source messages. Each dict
                             contains ``agent_id``, ``timestamp``, and ``body``.
                             Rendered as a ``## Source Findings`` section so the
                             vault note preserves the complete original content.
 
     Returns:
-        WriteResult with vault_rel path and CouchDB sync status.
+        WriteResult with kb_rel path and CouchDB sync status.
     """
     # Determine target directory within the vault.
     if domain:
         target_dir = vault_root / _CAIRN_SUBDIR / domain
-        vault_rel_prefix = f"{_CAIRN_SUBDIR}/{domain}"
+        kb_rel_prefix = f"{_CAIRN_SUBDIR}/{domain}"
     else:
         target_dir = vault_root / _CAIRN_SUBDIR
-        vault_rel_prefix = _CAIRN_SUBDIR
+        kb_rel_prefix = _CAIRN_SUBDIR
 
     target_dir.mkdir(parents=True, exist_ok=True)
 
     safe_name = _safe_filename(entity)
     note_file = target_dir / f"{safe_name}.md"
-    vault_rel = f"{vault_rel_prefix}/{safe_name}.md"
+    kb_rel = f"{kb_rel_prefix}/{safe_name}.md"
 
     now_iso = _now_iso()
 
@@ -166,7 +158,7 @@ async def write_note(
             now_iso=now_iso,
             source_findings=source_findings,
         )
-        logger.info("vault/writer: updated existing note %s", vault_rel)
+        logger.info("vault/writer: updated existing note %s", kb_rel)
     else:
         content = _build_new_note(
             entity=entity,
@@ -181,7 +173,7 @@ async def write_note(
             source_findings=source_findings,
         )
         note_file.write_text(content, encoding="utf-8")
-        logger.info("vault/writer: created new note %s", vault_rel)
+        logger.info("vault/writer: created new note %s", kb_rel)
 
     # CouchDB sync — best effort, disk is the primary store
     couchdb_synced = False
@@ -194,7 +186,7 @@ async def write_note(
         file_content = note_file.read_text(encoding="utf-8")
 
         put_result = await couchdb_client.put_note(
-            vault_rel_path=vault_rel,
+            kb_rel_path=kb_rel,
             content=file_content,
             ctime_ms=ctime_ms,
             mtime_ms=mtime_ms,
@@ -204,12 +196,12 @@ async def write_note(
         if not put_result.success:
             logger.warning(
                 "vault/writer: CouchDB sync failed for %s: %s",
-                vault_rel,
+                kb_rel,
                 couchdb_error,
             )
 
     return WriteResult(
-        vault_rel=vault_rel,
+        kb_rel=kb_rel,
         couchdb_synced=couchdb_synced,
         couchdb_error=couchdb_error,
     )
@@ -227,14 +219,13 @@ async def write_procedure(
     author: str | None,
     severity: str | None,
     low_confidence: bool,
-    couchdb_client: "CouchDBVaultClient | None" = None,
 ) -> WriteResult:
     target_dir = vault_root / _CAIRN_SUBDIR / "procedures"
     target_dir.mkdir(parents=True, exist_ok=True)
 
     safe_name = _safe_filename(title)
     note_file = target_dir / f"{safe_name}.md"
-    vault_rel = f"{_CAIRN_SUBDIR}/procedures/{safe_name}.md"
+    kb_rel = f"{_CAIRN_SUBDIR}/procedures/{safe_name}.md"
 
     now_iso = _now_iso()
 
@@ -268,7 +259,7 @@ async def write_procedure(
         try:
             stat = note_file.stat()
             put_result = await couchdb_client.put_note(
-                vault_rel_path=vault_rel,
+                kb_rel_path=kb_rel,
                 content=note_file.read_text(encoding="utf-8"),
                 ctime_ms=int(stat.st_ctime * 1000),
                 mtime_ms=int(stat.st_mtime * 1000),
@@ -276,11 +267,11 @@ async def write_procedure(
             couchdb_synced = put_result.success
             couchdb_error = put_result.error
         except Exception as exc:
-            logger.warning("vault/writer: CouchDB sync failed for %s: %s", vault_rel, exc)
+            logger.warning("vault/writer: CouchDB sync failed for %s: %s", kb_rel, exc)
             couchdb_synced = False
             couchdb_error = str(exc)
 
-    return WriteResult(vault_rel=vault_rel, couchdb_synced=couchdb_synced, couchdb_error=couchdb_error)
+    return WriteResult(kb_rel=kb_rel, couchdb_synced=couchdb_synced, couchdb_error=couchdb_error)
 
 
 def _build_procedure_note(

@@ -41,7 +41,7 @@ import chromadb
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from cairn.api.deps import authenticated_agent, get_couchdb_client, get_db_manager
+from cairn.api.deps import authenticated_agent, get_db_manager
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
 from cairn.jobs.promotion_scorer import PromotionScorer
@@ -63,7 +63,7 @@ def _get_resolver() -> WikilinkResolver:
     global _resolver_cache
     settings = get_settings()
     if _resolver_cache is None:
-        _resolver_cache = WikilinkResolver(settings.vault_path)
+        _resolver_cache = WikilinkResolver(settings.quartz_content_dir)
     return _resolver_cache
 
 
@@ -82,7 +82,7 @@ class CandidateResponse(BaseModel):
     source_message_ids: list[str]
     narrative: str
     reviewer_id: str | None
-    vault_path: str | None
+    kb_path: str | None
     created_at: str
     updated_at: str
 
@@ -171,7 +171,7 @@ async def list_candidates(
     cursor = await db.index_conn.execute(
         f"""
         SELECT id, entity, entity_type, topic_db, trigger, status, confidence,
-               source_message_ids, narrative, reviewer_id, vault_path,
+               source_message_ids, narrative, reviewer_id, kb_path,
                created_at, updated_at
         FROM promotion_candidates
         {where}
@@ -372,7 +372,7 @@ async def get_candidate(
     cursor = await db.index_conn.execute(
         """
         SELECT id, entity, entity_type, topic_db, trigger, status, confidence,
-               source_message_ids, narrative, reviewer_id, vault_path,
+               source_message_ids, narrative, reviewer_id, kb_path,
                created_at, updated_at
         FROM promotion_candidates
         WHERE id = ?
@@ -436,13 +436,12 @@ async def promote_candidate(
     related_links = _build_related_links(entity, entity_type, source_ids, resolver)
 
     # Write to vault (disk first, then best-effort CouchDB sync — Phase 4.4)
-    couchdb_client = get_couchdb_client()
     try:
         if body.methodology_kind == "procedure":
             steps = extract_steps(narrative)
             low_conf = len(steps) < 2
             write_result = await write_procedure(
-                settings.vault_path,
+                settings.quartz_content_dir,
                 title=entity[:60],
                 steps=steps,
                 tags=[],
@@ -452,11 +451,10 @@ async def promote_candidate(
                 author=reviewer_id,
                 severity=None,
                 low_confidence=low_conf,
-                couchdb_client=couchdb_client,
             )
         else:
             write_result = await write_note(
-                settings.vault_path,
+                settings.quartz_content_dir,
                 entity=entity,
                 entity_type=entity_type,
                 narrative=narrative,
@@ -465,7 +463,6 @@ async def promote_candidate(
                 promoted_at=now_iso,
                 related_links=related_links,
                 domain=entity_domain,
-                couchdb_client=couchdb_client,
                 source_findings=source_findings,
             )
     except Exception as exc:
@@ -475,13 +472,7 @@ async def promote_candidate(
             detail=f"Vault write failed: {exc}",
         )
 
-    vault_rel = write_result.vault_rel
-    if not write_result.couchdb_synced and couchdb_client is not None:
-        logger.warning(
-            "promote_candidate: CouchDB sync failed for %s: %s",
-            candidate_id,
-            write_result.couchdb_error,
-        )
+    kb_rel = write_result.kb_rel
 
     # Register the new note in the wikilink resolver cache
     resolver.register(entity)
@@ -492,13 +483,13 @@ async def promote_candidate(
         vault_col = get_vault_collection(chroma, settings.vault_collection)
         if body.methodology_kind == "procedure":
             steps = extract_steps(narrative)
-            doc_id = _procedure_doc_id(entity[:60], vault_rel)
+            doc_id = _procedure_doc_id(entity[:60], kb_rel)
             document = "\n".join([entity, narrative] + [f"{i+1}. {s}" for i, s in enumerate(steps)])
             metadata = {
                 "kind": "procedure",
                 "title": entity[:60],
                 "tags": "",
-                "vault_path": vault_rel,
+                "kb_path": kb_rel,
                 "source_message_ids": ",".join(source_ids),
                 "promoted_at": now_iso,
             }
@@ -506,7 +497,7 @@ async def promote_candidate(
         else:
             upsert_vault_note(
                 vault_col,
-                vault_path=vault_rel,
+                kb_path=kb_rel,
                 title=entity,
                 summary=narrative[:500] if narrative else "",
                 entity_type=entity_type,
@@ -521,11 +512,11 @@ async def promote_candidate(
         await conn.execute(
             """
             UPDATE promotion_candidates
-            SET status = 'promoted', vault_path = ?, reviewer_id = ?,
+            SET status = 'promoted', kb_path = ?, reviewer_id = ?,
                 narrative = ?, updated_at = ?
             WHERE id = ?
             """,
-            (vault_rel, reviewer_id, narrative, now_iso, candidate_id),
+            (kb_rel, reviewer_id, narrative, now_iso, candidate_id),
         )
         # Also update message_index promote status for source messages
         for msg_id in source_ids:
@@ -608,7 +599,7 @@ async def _fetch_candidate(db: DatabaseManager, candidate_id: str) -> CandidateR
     cursor = await db.index_conn.execute(
         """
         SELECT id, entity, entity_type, topic_db, trigger, status, confidence,
-               source_message_ids, narrative, reviewer_id, vault_path,
+               source_message_ids, narrative, reviewer_id, kb_path,
                created_at, updated_at
         FROM promotion_candidates WHERE id = ?
         """,
@@ -631,7 +622,7 @@ def _row_to_candidate(row) -> CandidateResponse:
         source_message_ids=source_ids,
         narrative=row["narrative"] or "",
         reviewer_id=row["reviewer_id"],
-        vault_path=row["vault_path"],
+        kb_path=row["kb_path"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

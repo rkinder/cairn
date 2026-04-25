@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS promotion_candidates (
     source_message_ids  TEXT NOT NULL DEFAULT '[]',
     narrative           TEXT NOT NULL DEFAULT '',
     reviewer_id         TEXT,
-    vault_path          TEXT,
+    kb_path          TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL,
     ext                 TEXT NOT NULL DEFAULT '{}'

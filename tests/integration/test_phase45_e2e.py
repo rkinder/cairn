@@ -21,12 +21,12 @@ async def test_full_phase45_e2e_route_c_to_route_a(
         {
             "id": "c-123", "entity": "test-entity", "entity_type": "actor", "entity_domain": None,
             "source_message_ids": '["m-1"]', "narrative": "narr", "confidence": 0.9, "status": "pending_review",
-            "topic_db": "osint", "trigger": "trigger", "reviewer_id": None, "vault_path": None, "created_at": "dt", "updated_at": "dt"
+            "topic_db": "osint", "trigger": "trigger", "reviewer_id": None, "kb_path": None, "created_at": "dt", "updated_at": "dt"
         },
         {
             "id": "c-123", "entity": "test-entity", "entity_type": "actor", "entity_domain": None,
             "source_message_ids": '["m-1"]', "narrative": "narr", "confidence": 0.9, "status": "promoted",
-            "topic_db": "osint", "trigger": "trigger", "reviewer_id": "analyst-1", "vault_path": "cairn/procedures/test-entity.md", "created_at": "dt", "updated_at": "dt"
+            "topic_db": "osint", "trigger": "trigger", "reviewer_id": "analyst-1", "kb_path": "cairn/procedures/test-entity.md", "created_at": "dt", "updated_at": "dt"
         }
     ])
 
@@ -48,7 +48,7 @@ async def test_full_phase45_e2e_route_c_to_route_a(
     db_mock.index.return_value = AsyncCtx()
 
     mock_fetch.return_value = []
-    write_result = WriteResult(vault_rel="cairn/procedures/test-entity.md", couchdb_synced=False, couchdb_error=None)
+    write_result = WriteResult(kb_rel="cairn/procedures/test-entity.md")
 
     async def amock_write_procedure(*args, **kwargs):
         return write_result
