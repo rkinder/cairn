@@ -63,6 +63,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from cairn.kb.sync_worker import get_sync_queue
 from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
@@ -175,37 +176,11 @@ async def write_note(
         note_file.write_text(content, encoding="utf-8")
         logger.info("vault/writer: created new note %s", kb_rel)
 
-    # CouchDB sync — best effort, disk is the primary store
-    couchdb_synced = False
-    couchdb_error: str | None = None
+    queue = get_sync_queue()
+    if queue is not None:
+        queue.put_nowait(True)
 
-    if couchdb_client is not None:
-        stat = note_file.stat()
-        ctime_ms = int(stat.st_ctime * 1000)
-        mtime_ms = int(stat.st_mtime * 1000)
-        file_content = note_file.read_text(encoding="utf-8")
-
-        put_result = await couchdb_client.put_note(
-            kb_rel_path=kb_rel,
-            content=file_content,
-            ctime_ms=ctime_ms,
-            mtime_ms=mtime_ms,
-        )
-        couchdb_synced = put_result.success
-        couchdb_error = put_result.error
-        if not put_result.success:
-            logger.warning(
-                "vault/writer: CouchDB sync failed for %s: %s",
-                kb_rel,
-                couchdb_error,
-            )
-
-    return WriteResult(
-        kb_rel=kb_rel,
-        couchdb_synced=couchdb_synced,
-        couchdb_error=couchdb_error,
-    )
-
+    return WriteResult(kb_rel=kb_rel)
 
 async def write_procedure(
     vault_root: Path,
@@ -251,27 +226,7 @@ async def write_procedure(
             now_iso=now_iso,
         )
         note_file.write_text(content, encoding="utf-8")
-
-    couchdb_synced = False
-    couchdb_error: str | None = None
-
-    if couchdb_client is not None:
-        try:
-            stat = note_file.stat()
-            put_result = await couchdb_client.put_note(
-                kb_rel_path=kb_rel,
-                content=note_file.read_text(encoding="utf-8"),
-                ctime_ms=int(stat.st_ctime * 1000),
-                mtime_ms=int(stat.st_mtime * 1000),
-            )
-            couchdb_synced = put_result.success
-            couchdb_error = put_result.error
-        except Exception as exc:
-            logger.warning("vault/writer: CouchDB sync failed for %s: %s", kb_rel, exc)
-            couchdb_synced = False
-            couchdb_error = str(exc)
-
-    return WriteResult(kb_rel=kb_rel, couchdb_synced=couchdb_synced, couchdb_error=couchdb_error)
+    return WriteResult(kb_rel=kb_rel)
 
 
 def _build_procedure_note(

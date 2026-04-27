@@ -163,7 +163,7 @@ async def test_route_c_full_procedure_promotion(mock_fetch, mock_get_collection,
 
     mock_fetch.return_value = []
     
-    write_result = WriteResult(kb_rel="cairn/procedures/test-entity.md", couchdb_synced=False, couchdb_error=None)
+    write_result = WriteResult(kb_rel="cairn/procedures/test-entity.md")
     
     async def amock_write_procedure(*args, **kwargs):
         return write_result
