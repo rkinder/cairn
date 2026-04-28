@@ -19,7 +19,7 @@ async def test_note_routed_to_procedures_subdir(tmp_path: Path):
         severity="high",
         low_confidence=False,
     )
-    assert "procedures/" in result.vault_rel
+    assert "procedures/" in result.kb_rel
 
 
 @pytest.mark.asyncio
@@ -36,7 +36,7 @@ async def test_vault_note_has_procedure_source(tmp_path: Path):
         severity=None,
         low_confidence=False,
     )
-    note = (tmp_path / result.vault_rel).read_text(encoding="utf-8")
+    note = (tmp_path / result.kb_rel).read_text(encoding="utf-8")
     assert "procedure_source: blackboard" in note
 
 
@@ -54,7 +54,7 @@ async def test_prose_body_low_confidence(tmp_path: Path):
         severity=None,
         low_confidence=True,
     )
-    note = (tmp_path / result.vault_rel).read_text(encoding="utf-8")
+    note = (tmp_path / result.kb_rel).read_text(encoding="utf-8")
     assert "low_confidence: true" in note
 
 
@@ -72,7 +72,7 @@ async def test_steps_rendered_numbered(tmp_path: Path):
         severity=None,
         low_confidence=False,
     )
-    note = (tmp_path / result.vault_rel).read_text(encoding="utf-8")
+    note = (tmp_path / result.kb_rel).read_text(encoding="utf-8")
     assert "## Steps" in note
     assert "1. First major action" in note
     assert "2. Second major action" in note
@@ -92,7 +92,7 @@ async def test_write_result_success_on_disk_write(tmp_path: Path):
         severity=None,
         low_confidence=False,
     )
-    assert bool(result.vault_rel)
+    assert bool(result.kb_rel)
 
 
 @pytest.mark.asyncio
@@ -121,7 +121,7 @@ async def test_deduplication_updates_existing(tmp_path: Path):
         severity=None,
         low_confidence=False,
     )
-    assert result1.vault_rel == result2.vault_rel
+    assert result1.kb_rel == result2.kb_rel
     files = list((tmp_path / "cairn" / "procedures").glob("Dup Title.md"))
     assert len(files) == 1
 
@@ -140,7 +140,7 @@ async def test_tags_in_frontmatter(tmp_path: Path):
         severity=None,
         low_confidence=False,
     )
-    note = (tmp_path / result.vault_rel).read_text(encoding="utf-8")
+    note = (tmp_path / result.kb_rel).read_text(encoding="utf-8")
     assert "tags:" in note
     assert "procedure" in note
     assert "cairn-promoted" in note

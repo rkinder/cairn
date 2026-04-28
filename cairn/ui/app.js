@@ -549,8 +549,8 @@ function buildPromoCard(cand) {
   const confText = cand.confidence != null ? `conf ${Math.round(cand.confidence * 100)}%` : '';
   const sourceChips = (cand.source_message_ids || [])
     .map(id => `<span>${id.slice(0, 8)}…</span>`).join('');
-  const vaultLinkHtml = cand.vault_path
-    ? `<div class="promo-vault-link">📄 ${escapeHtml(cand.vault_path)}</div>` : '';
+  const vaultLinkHtml = cand.kb_path
+    ? `<div class="promo-vault-link">📄 ${escapeHtml(cand.kb_path)}</div>` : '';
 
   card.innerHTML = `
     <div class="promo-card-header">

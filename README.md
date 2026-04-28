@@ -16,7 +16,7 @@ The name reflects the core idea: agents leave markers for each other, each one b
 
 Agents post findings to a central REST API as **YAML frontmatter + markdown body** documents. Every message is simultaneously machine-readable (structured envelope for querying and routing) and human-readable (narrative body for analyst consumption). A cross-domain SQLite index lets any participant query across knowledge domains without knowing which database a message lives in.
 
-When enough evidence accumulates around a finding — through corroboration across agents, analyst judgement, or agent self-nomination — it gets **promoted** from the high-volume SQLite inbox into a curated Obsidian vault as a properly linked markdown note. The vault stays performant and human-navigable because promotion is controlled and deliberate.
+When enough evidence accumulates around a finding — through corroboration across agents, analyst judgement, or agent self-nomination — it gets **promoted** from the high-volume SQLite inbox into a curated Quartz knowledge base as a properly linked markdown note. The KB stays performant and human-navigable because promotion is controlled and deliberate.
 
 Detection methodologies are version-controlled in GitLab, validated by CI before merge, and discoverable by agents via semantic search against a ChromaDB collection. Every time an agent runs a methodology, the exact commit SHA is recorded — so execution history is always tied to the precise version of the rule that ran.
 
@@ -78,9 +78,9 @@ Each knowledge domain has its own schema-optimised database:
 
 Agents query `index.db` first to discover routing, then hit the appropriate topic database. Adding a new knowledge domain is a single `cairn-admin db register` command.
 
-**Tier 2 — Obsidian vault (curated human knowledge base)**
+**Tier 2 — Quartz knowledge base (curated human knowledge base)**
 
-Significant findings are **promoted** from SQLite into the vault as properly structured markdown notes with wikilinks, tags, and backlinks. The vault is not a message store — it is a curated knowledge base. The graph view stays performant because promotion is controlled (Obsidian graph degrades noticeably above ~10,000 notes; the SQLite tier absorbs high-volume traffic before it reaches the vault).
+Significant findings are **promoted** from SQLite into the KB as properly structured markdown notes with wikilinks, tags, and backlinks. The KB is not a message store — it is a curated knowledge base served as a Quartz static site. The content stays performant and human-navigable because promotion is controlled (the SQLite tier absorbs high-volume traffic before it reaches the KB).
 
 ### Methodology Integration
 
@@ -152,9 +152,9 @@ The corroboration job runs every 15 minutes. It finds that `185.220.101.47` was 
 
 The web UI's Promotion Queue panel shows the candidate. The analyst sees both source messages side by side, the extracted entities (IP, actor tag `FIN7`), and a pre-synthesized narrative. They edit it slightly and click **Promote**.
 
-**5. Vault writer runs**
+**5. KB writer runs**
 
-The entity extractor confirms: one IP entity, one actor entity. The wikilink resolver scans the vault — no existing note for `185.220.101.47`, but there is a note for `FIN7`. The vault writer produces:
+The entity extractor confirms: one IP entity, one actor entity. The wikilink resolver scans the KB — no existing note for `185.220.101.47`, but there is a note for `FIN7`. The KB writer produces:
 
 ```markdown
 ---
@@ -182,9 +182,9 @@ active VirusTotal detections as of 2026-04-14.
 [[FIN7]] · [[lateral-movement]] · [[c2]]
 ```
 
-This note is written to the bind-mounted vault directory and immediately synced to Obsidian clients via CouchDB/LiveSync.
+This note is written to the Quartz content directory. If a sync command is configured (`CAIRN_QUARTZ_SYNC_CMD`), the Quartz static site is rebuilt automatically so the note is immediately browsable.
 
-**6. Vault-notes ChromaDB sync**
+**6. KB-notes ChromaDB sync**
 
 The note's title and summary are upserted into the `vault-notes` ChromaDB collection. Now if any agent calls `find_vault_note("tor exit node C2 beaconing")` in a future investigation, this note surfaces as a top result — and the agent can pull the originating SQLite records for the full evidence chain.
 
@@ -197,11 +197,11 @@ refs = await client.find_vault_note("FIN7 C2 infrastructure", n=3)
 # returns: VaultNoteRef(vault_path="ips/185.220.101.47.md", score=0.94, ...)
 ```
 
-It now knows this IP is already documented, can link its new finding to the existing vault note, and skips redundant re-investigation — the knowledge compounds over time.
+It now knows this IP is already documented, can link its new finding to the existing KB note, and skips redundant re-investigation — the knowledge compounds over time.
 
 ---
 
-That's the full loop: raw signal → blackboard → corroboration → human review → curated vault note → semantic discovery by future agents.
+That's the full loop: raw signal → blackboard → corroboration → human review → curated KB note → semantic discovery by future agents.
 
 ---
 
@@ -367,7 +367,7 @@ Every push to the methodology repo will now sync updated `.yml` files into Chrom
 
 ### Message Format
 
-Every message is a markdown document with a YAML frontmatter envelope — the same format Obsidian uses internally. The frontmatter is the agent-facing structured envelope; the markdown body is the human-readable narrative.
+Every message is a markdown document with a YAML frontmatter envelope — a widely used format for structured markdown documents. The frontmatter is the agent-facing structured envelope; the markdown body is the human-readable narrative.
 
 ```yaml
 ---
@@ -484,7 +484,7 @@ Agent tokens alone cannot reach `validated` or `deprecated`. This gate holds unt
 
 **Methodology text is never stored in Cairn.** Only the GitLab path and commit SHA are persisted. Content is always fetched on demand from GitLab so the exact version that ran can always be retrieved.
 
-### Promotion: SQLite → Obsidian Vault
+### Promotion: SQLite → Quartz Knowledge Base
 
 Three promotion triggers fire automatically or through analyst action:
 
@@ -492,7 +492,7 @@ Three promotion triggers fire automatically or through analyst action:
 2. **Human-in-the-loop** — analyst uses the web UI Promotion Queue tab to review candidates, edit the narrative, and click Promote
 3. **Agent self-nomination** — agent sets `promote: candidate` with `confidence` above threshold; treated as a candidate requiring human approval
 
-On promotion, entities in the markdown body (IPs, CVE IDs, MITRE ATT&CK technique IDs, actor names) are extracted by the regex entity extractor and converted to Obsidian wikilinks. If a note for that entity already exists, a new `## Evidence` entry is appended and `last_updated` is refreshed — no duplicate file is created.
+On promotion, entities in the markdown body (IPs, CVE IDs, MITRE ATT&CK technique IDs, actor names) are extracted by the regex entity extractor and converted to wikilinks. If a note for that entity already exists, a new `## Evidence` entry is appended and `last_updated` is refreshed — no duplicate file is created.
 
 ---
 
@@ -571,15 +571,15 @@ cairn-admin db deactivate network
 - Sigma CI/CD pipeline template (`gitlab-ci/sigma-validate.yml`)
 - `Dockerfile` + `docker-compose.yml` (cairn-api + chromadb + GitLab CE)
 
-### Phase 4 — Obsidian Vault Bridge ✅
+### Phase 4 — Knowledge Base Bridge ✅
 - Corroboration detection job (APScheduler, 15 min interval) — N agents, same entity, configurable time window
 - Regex entity extractor — IPv4, IPv6, FQDN, CVE IDs, MITRE ATT&CK T-IDs, actor tags
-- Vault writer with deduplication — structured notes with `## Summary` / `## Evidence` / `## Related`; appends to existing notes
-- Wikilink resolver — scans vault once (run-duration cache), resolves entity values to `[[existing-notes]]`
+- KB writer with deduplication — structured notes with `## Summary` / `## Evidence` / `## Related`; appends to existing notes
+- Wikilink resolver — scans KB once (run-duration cache), resolves entity values to `[[existing-notes]]`
 - ChromaDB `vault-notes` collection — semantic search over promoted notes via `GET /vault/search`
 - Human promotion UI — Promotion Queue tab with expandable cards, editable narrative, Promote / Dismiss
 - `BlackboardClient.find_vault_note()` — agents check for prior curated knowledge before investigating
-- CouchDB service + Obsidian LiveSync support for multi-device vault access
+- Quartz 4 static site as Tier 2 KB — promoted notes written to Quartz content directory, optional rebuild on promotion
 - `promotion_candidates` table in `index.db` (schema v3, migration 002)
 
 ### Phase 4.5 — Procedural Methodology Ingestion ✅

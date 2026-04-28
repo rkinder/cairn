@@ -29,7 +29,7 @@ Public functions
 get_vault_collection(client)
     Get or create the vault-notes ChromaDB collection.
 
-upsert_vault_note(collection, *, vault_path, title, summary, entity_type,
+upsert_vault_note(collection, *, kb_path, title, summary, entity_type,
                   confidence, promoted_at)
     Index or update a promoted vault note.
 
@@ -79,7 +79,7 @@ def get_vault_collection(
 def upsert_vault_note(
     collection: chromadb.Collection,
     *,
-    vault_path: str,
+    kb_path: str,
     title: str,
     summary: str,
     entity_type: str,
@@ -91,23 +91,23 @@ def upsert_vault_note(
     The chroma document is ``title + "\\n\\n" + summary`` (never the full
     markdown body) so the index stays compact.
 
-    The ChromaDB document ID is derived from *vault_path* so re-promoting the
+    The ChromaDB document ID is derived from *kb_path* so re-promoting the
     same entity overwrites the previous entry rather than creating a duplicate.
 
     Args:
         collection:   ChromaDB vault-notes collection.
-        vault_path:   Relative path of the note file within the vault.
+        kb_path:   Relative path of the note file within the vault.
         title:        Note title (the entity's canonical name).
         summary:      Short human-readable summary of the note content.
         entity_type:  One of: ipv4, ipv6, fqdn, cve, technique, actor.
         confidence:   Promotion confidence score, or None.
         promoted_at:  ISO8601 timestamp of the promotion event.
     """
-    doc_id = _path_to_chroma_id(vault_path)
+    doc_id = _path_to_chroma_id(kb_path)
     document = f"{title}\n\n{summary}" if summary else title
 
     metadata: dict[str, Any] = {
-        "vault_path":   vault_path,
+        "kb_path":   kb_path,
         "title":        title,
         "entity_type":  entity_type,
         "promoted_at":  promoted_at,
@@ -141,7 +141,7 @@ def search_vault_notes(
 
     Returns:
         List of dicts, each containing:
-            vault_path, title, entity_type, confidence, promoted_at, score
+            kb_path, title, entity_type, confidence, promoted_at, score
         Ordered by descending similarity score.
     """
     try:
@@ -159,7 +159,7 @@ def search_vault_notes(
         score = max(0.0, 1.0 - dist)
         output.append(
             {
-                "vault_path":  meta.get("vault_path",  ""),
+                "kb_path":  meta.get("kb_path",  ""),
                 "title":       meta.get("title",       ""),
                 "entity_type": meta.get("entity_type", ""),
                 "confidence":  meta.get("confidence"),

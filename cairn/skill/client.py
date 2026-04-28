@@ -147,9 +147,9 @@ class VaultNoteRef:
     """Lightweight reference to a promoted Obsidian vault note.
 
     Full note content is never embedded here — read the file from the vault
-    directory using vault_path when you need the narrative.
+    directory using kb_path when you need the narrative.
     """
-    vault_path:  str          # vault-relative path (e.g. "cairn/APT29.md")
+    kb_path:  str          # vault-relative path (e.g. "cairn/APT29.md")
     title:       str          # entity name / note title
     entity_type: str          # ipv4 | ipv6 | fqdn | cve | technique | actor
     confidence:  float | None # promotion confidence score
@@ -509,7 +509,7 @@ class BlackboardClient:
     ) -> list[VaultNoteRef]:
         """Semantic search over promoted Obsidian vault notes.
 
-        Returns ranked VaultNoteRef objects — vault_path, title, entity_type,
+        Returns ranked VaultNoteRef objects — kb_path, title, entity_type,
         confidence, and a similarity score.  Full note content is NOT returned;
         read the file from the vault directory when you need the narrative.
 
@@ -527,7 +527,7 @@ class BlackboardClient:
         response = await self._request("GET", url, params={"q": query, "n": n})
         return [
             VaultNoteRef(
-                vault_path=item["vault_path"],
+                kb_path=item["kb_path"],
                 title=item["title"],
                 entity_type=item["entity_type"],
                 confidence=item.get("confidence"),

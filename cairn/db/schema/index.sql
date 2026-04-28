@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS promotion_candidates (
     source_message_ids  TEXT NOT NULL DEFAULT '[]', -- JSON array of blackboard message IDs
     narrative           TEXT NOT NULL DEFAULT '',   -- human-editable note body (markdown)
     reviewer_id         TEXT,                       -- set when status → promoted or dismissed
-    vault_path          TEXT,                       -- relative path of the note within the vault
+    kb_path          TEXT,                       -- relative path of the note within the knowledge base
     created_at          TEXT NOT NULL,          -- ISO8601
     updated_at          TEXT NOT NULL,          -- ISO8601
     ext                 TEXT NOT NULL DEFAULT '{}'

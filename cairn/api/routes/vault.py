@@ -20,7 +20,7 @@
 GET /vault/search?q=<query>&n=<int>
 
 Semantic search over the ChromaDB vault-notes collection.  Returns ranked
-vault note references — vault_path, title, entity_type, confidence, score.
+vault note references — kb_path, title, entity_type, confidence, score.
 Full note content is never returned; fetch the file from the vault path when
 you need the narrative.
 """
@@ -47,7 +47,7 @@ router = APIRouter(prefix="/vault", tags=["vault"])
 # ---------------------------------------------------------------------------
 
 class VaultNoteResult(BaseModel):
-    vault_path:  str
+    kb_path:  str
     title:       str
     entity_type: str
     confidence:  float | None
@@ -93,7 +93,7 @@ async def search_vault(
 
     return [
         VaultNoteResult(
-            vault_path=item["vault_path"],
+            kb_path=item["kb_path"],
             title=item["title"],
             entity_type=item["entity_type"],
             confidence=item.get("confidence"),

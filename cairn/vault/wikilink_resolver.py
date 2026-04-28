@@ -33,7 +33,7 @@ Usage::
 
     from cairn.vault.wikilink_resolver import WikilinkResolver
 
-    resolver = WikilinkResolver(vault_path)
+    resolver = WikilinkResolver(kb_path)
     link = resolver.resolve("APT29")       # "[[APT29]]" if note exists
     link = resolver.resolve("203.0.113.1") # "[[203.0.113.1]]" (unresolved)
     resolver.register("New Note Title")    # add a just-created note to cache
@@ -60,11 +60,11 @@ class WikilinkResolver:
     """Scan the vault once, then resolve entity values to ``[[wikilinks]]``.
 
     Args:
-        vault_path: Path to the Obsidian vault root directory.
+        kb_path: Path to the Obsidian vault root directory.
     """
 
-    def __init__(self, vault_path: Path) -> None:
-        self._vault_path = vault_path
+    def __init__(self, kb_path: Path) -> None:
+        self._kb_path = kb_path
         # Maps lower-cased key → canonical note title (stem of the .md file)
         self._cache: dict[str, str] | None = None
 
@@ -114,11 +114,11 @@ class WikilinkResolver:
         """Walk the vault and index all note titles and aliases."""
         cache: dict[str, str] = {}
 
-        if not self._vault_path.is_dir():
-            logger.warning("Vault path does not exist or is not a directory: %s", self._vault_path)
+        if not self._kb_path.is_dir():
+            logger.warning("Vault path does not exist or is not a directory: %s", self._kb_path)
             return cache
 
-        for md_file in self._vault_path.rglob("*.md"):
+        for md_file in self._kb_path.rglob("*.md"):
             # Skip hidden Obsidian internals (.obsidian/, .trash/, etc.)
             if any(part.startswith(".") for part in md_file.parts):
                 continue
@@ -136,7 +136,7 @@ class WikilinkResolver:
             except OSError:
                 pass  # unreadable file — index title only
 
-        logger.debug("WikilinkResolver: indexed %d keys from %s", len(cache), self._vault_path)
+        logger.debug("WikilinkResolver: indexed %d keys from %s", len(cache), self._kb_path)
         return cache
 
 

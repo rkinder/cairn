@@ -1,73 +1,46 @@
-# Phase 4.5 — Procedural Methodology Ingestion
+# Phase 4.5: Procedural Methodology Ingestion
 
-This phase extends Cairn methodology support from Sigma-only metadata to dual-kind discovery and promotion (`sigma` + `procedure`), with Route A and Route C coverage.
+## Overview
+Phase 4.5 introduces support for **Procedural Methodologies** alongside existing Sigma rules. While Sigma rules are used to express detection logic in an engine-agnostic way, procedural methodologies provide step-by-step guidance for manual investigation and triage.
+
+Procedural methodologies are written as YAML files with the extension `.procedure.yml` and follow a strict structure. Like Sigma rules, they are version-controlled in GitLab and ingested into the Cairn Blackboard via ChromaDB for semantic search.
+
+## Authoring Procedures
+
+Procedures must adhere to the `ProcedureMethodology` schema:
+```yaml
+title: "Phishing Triage Procedure"
+author: "analyst-1"
+created_at: "2026-04-24T00:00:00Z"
+version: "1.0"
+tags: ["phishing", "triage", "investigation"]
+summary: "Standard procedure for analyzing reported phishing emails."
+steps:
+  - "Extract email headers and check sender reputation."
+  - "Identify and detonate suspicious attachments in a sandbox."
+  - "Extract URLs and analyze them via Threat Intelligence feeds."
+```
+
+### Step Format Tips
+- Use imperative language for steps.
+- Steps should ideally be complete sentences, as they may be parsed using NLP models like spaCy for entity extraction and step segmentation.
+- Steps shorter than 10 characters are filtered out during promotion or ingestion, so ensure steps carry meaningful instruction.
 
 ## Endpoints
 
-### `GET /methodologies/search`
+1. **Methodology Search Endpoint** (`GET /methodologies/search`)
+   - Added `kind` parameter which can be `sigma`, `procedure`, or `any`.
+   - Returns both methodologies along with their type.
 
-Supports optional `kind` filter:
-
-- `kind=sigma`
-- `kind=procedure`
-- `kind=any` (or omitted)
-
-Response item includes:
-
-- `gitlab_path`
-- `commit_sha`
-- `title`
-- `tags`
-- `status`
-- `kind`
-- `score`
-
-### `POST /promotions/{candidate_id}/promote`
-
-`PromoteRequest` accepts:
-
-- `narrative` (optional)
-- `methodology_kind` (optional, `sigma` or `procedure`)
-
-When `methodology_kind=procedure`, the route extracts steps from narrative, writes a procedure-style note, and upserts metadata tagged as `kind=procedure`.
+2. **Promotion Endpoint** (`POST /promotions/{id}/promote`)
+   - Supports a `methodology_kind` field. If set to `procedure`, the extracted narrative is parsed into distinct procedural steps rather than being stored as a raw narrative blob.
 
 ## Route A vs Route C
 
-### Route A (GitLab → Chroma methodology search)
+- **Route A**: Creating a `.procedure.yml` file and committing it directly to GitLab. The standard methodology sync job picks this up and adds it to ChromaDB.
+- **Route C**: A procedural methodology generated dynamically from a sequence of agent findings on the blackboard, flagged for promotion by an analyst. The steps are extracted from the finding's narrative and written to the Obsidian vault under `cairn/procedures/`.
 
-1. Author `.procedure.yml` under procedure directory.
-2. Run sync path (`sync_procedures()`).
-3. Query via `/methodologies/search?kind=procedure`.
-4. Validate result carries `kind=procedure`.
+## Optional spaCy Gate
 
-### Route C (Promotion → Vault + Chroma upsert)
+To improve the segmentation of steps during Route C promotion, the `cairn` service supports an optional dependency on `spaCy`. Set `CAIRN_SPACY_ENABLED=true` in `.env` to enable it. When enabled, Cairn will use spaCy to split step text more robustly than standard regex heuristics.
 
-1. Analyst calls promote endpoint with human review headers.
-2. Optional `methodology_kind=procedure` selects procedure branch.
-3. Narrative steps extracted by `extract_steps()`.
-4. Vault write + best-effort Chroma upsert.
-5. Candidate status updated to `promoted`.
-
-## Procedure authoring tips
-
-- Keep title stable and specific.
-- Prefer explicit numbered or bulleted steps (best extraction quality).
-- Keep each step >= 10 characters.
-- Include concise summary and operational tags.
-- Treat `narrative` as analyst-curated context; steps should be executable.
-
-## spaCy-gated sentence fallback
-
-`extract_steps()` uses this order:
-
-1. Numbered list extraction
-2. Bulleted list extraction
-3. Optional spaCy sentence segmentation fallback (gated)
-4. Basic `. ` split fallback
-
-Feature gate:
-
-- `CAIRN_SPACY_ENABLED=false` by default
-- Optional dependency extra: `pip install .[nlp]`
-
-This keeps base image/runtime light while allowing improved sentence boundaries where needed.

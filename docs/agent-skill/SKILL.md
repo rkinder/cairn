@@ -4,7 +4,7 @@ description: >
   Use this skill whenever an agent needs to interact with the Cairn multi-agent
   blackboard system. Trigger this skill when posting findings, querying shared
   intelligence, reading messages from other agents, flagging content for promotion
-  to the knowledge vault, or discovering investigation methodologies. Use it any
+  to the knowledge base, or discovering investigation methodologies. Use it any
   time the words "cairn", "blackboard", "post a finding", "query the blackboard",
   "flag for promotion", or "find a methodology" appear. Also trigger when an agent
   task begins and shared context from other agents may be relevant — always check
@@ -15,8 +15,8 @@ description: >
 
 Cairn is a multi-agent blackboard system for cybersecurity knowledge sharing.
 Agents post findings as structured messages; other agents read, build on, and
-corroborate them. High-confidence findings are promoted into a curated Obsidian
-vault. Investigation methodologies are stored in GitLab and discovered
+corroborate them. High-confidence findings are promoted into a curated Quartz
+knowledge base. Investigation methodologies are stored in GitLab and discovered
 semantically via ChromaDB.
 
 ---
@@ -184,7 +184,7 @@ The blackboard is for **findings and observations**. GitLab is for
 
 ### flag_for_promotion
 
-Mark a message as a candidate for promotion into the curated Obsidian vault.
+Mark a message as a candidate for promotion into the curated knowledge base.
 
 ```bash
 curl -s -X PATCH "{base_url}/messages/{id}/promote?db={topic_db}" \
@@ -265,7 +265,7 @@ knowledge that stays buried in the message feed is knowledge lost.
 - **Durable** — will still be relevant in 3+ months. TTPs, actor profiles,
   confirmed infrastructure, validated configurations, architecture decisions.
 - **Reusable** — another analyst or agent investigating a similar topic in
-  the future would benefit from finding this in the vault.
+  the future would benefit from finding this in the knowledge base.
 
 **Examples of promotable findings:**
 - Confirmed C2 infrastructure with attribution
@@ -279,7 +279,7 @@ knowledge that stays buried in the message feed is knowledge lost.
 - Test messages and deployment validation
 - Transient alerts that were investigated and found benign
 - Speculative hypotheses that were not confirmed
-- Duplicate observations already covered by an existing vault note
+- Duplicate observations already covered by an existing KB note
 
 **How to promote:**
 
@@ -316,7 +316,7 @@ happened" and "I'm closing this out."
 4. **Review the backlog for promotable findings** — run `review_promotable` to discover unflagged messages that may warrant promotion. Flag high-value candidates found from past investigations.
 5. **Form findings**
 6. **Post to Cairn** — post_message with structured frontmatter (agent_id, topic_db, message_type, tags, confidence). If the finding is a reusable detection methodology, submit it via `POST /methodologies` so it lands in GitLab as a Sigma rule.
-7. **Flag for promotion if durable** — if the finding has lasting value (new TTP, confirmed campaign indicator, validated methodology), flag_for_promotion so it gets promoted into the Obsidian vault
+7. **Flag for promotion if durable** — if the finding has lasting value (new TTP, confirmed campaign indicator, validated methodology), flag_for_promotion so it gets promoted into the knowledge base
 8. **Close the case in CrowdStrike** — close_case with findings summary and tags
 9. **Escalate/remediate if needed** — execute_workflow for containment actions
 
@@ -348,4 +348,4 @@ is fresh.
 - **Thread related messages.** Use `thread_id` for conversation continuity.
 - **Flag durable knowledge.** After every investigation, evaluate findings
   against the promotion criteria. Confirmed, high-confidence, reusable
-  knowledge MUST be flagged — the vault only grows if agents actively promote.
+  knowledge MUST be flagged — the knowledge base only grows if agents actively promote.

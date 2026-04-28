@@ -35,6 +35,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
+        extra="ignore",
         env_prefix="CAIRN_",
         env_file=".env",
         env_file_encoding="utf-8",
@@ -120,16 +121,16 @@ class Settings(BaseSettings):
     )
 
     # ---------------------------------------------------------------------------
-    # Obsidian vault bridge (Phase 4)
+    # Quartz Knowledge Base (Phase 4.6)
     # ---------------------------------------------------------------------------
 
-    vault_path: Path = Field(
-        default=Path("/vault"),
-        description=(
-            "Absolute path to the Obsidian vault directory. "
-            "Must be pre-initialised by Obsidian (.obsidian/ folder must exist). "
-            "In Docker Compose this is bind-mounted into the container at the same path."
-        ),
+    quartz_content_dir: Path = Field(
+        default=Path("./kb_content"),
+        description="Directory where Quartz 4 Markdown notes are saved.",
+    )
+    quartz_sync_cmd: str | None = Field(
+        default=None,
+        description="Command to run after a note is promoted (e.g. 'npx quartz sync').",
     )
     vault_collection: str = Field(
         default="vault-notes",
@@ -164,27 +165,7 @@ class Settings(BaseSettings):
     )
 
     # ---------------------------------------------------------------------------
-    # CouchDB integration (Phase 4.4 — Obsidian LiveSync vault sync)
-    # ---------------------------------------------------------------------------
-    # These vars use NO CAIRN_ prefix — they're shared with docker-compose.yml
-    # These use the standard CAIRN_ prefix (e.g. CAIRN_COUCHDB_USER).
 
-    couchdb_url: str = Field(
-        default="http://couchdb:5984",
-    )
-    couchdb_user: str = Field(
-        default="",
-    )
-    couchdb_password: str = Field(
-        default="",
-    )
-    couchdb_database: str = Field(
-        default="obsidian-livesync",
-    )
-    couchdb_enabled: bool = Field(
-        default=True,
-        description="Set false to disable the CouchDB dual-write entirely.",
-    )
 
     # ---------------------------------------------------------------------------
     # NLP optional features (Phase 4.5)
