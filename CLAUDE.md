@@ -17,7 +17,7 @@ This project was designed bottom-up from first principles, intentionally avoidin
 
 ### Message Format: YAML Frontmatter + Markdown Body
 
-Every message an agent posts to the blackboard is a markdown document with a YAML frontmatter envelope. This is the same format Obsidian uses internally.
+Every message an agent posts to the blackboard is a markdown document with a YAML frontmatter envelope. This is a widely used format for structured markdown documents.
 
 ```yaml
 ---
@@ -56,9 +56,9 @@ Plus one routing database:
 
 Agents hit the index first, get routed to the right topic database, query there directly. Adding a new domain is just registering it in the index — agents discover it without code changes.
 
-**Tier 2 — Obsidian Vault (curated human knowledge base)**
+**Tier 2 — Quartz Knowledge Base (curated human knowledge base)**
 
-Significant findings are **promoted** from SQLite into the vault as proper markdown notes with wikilinks, tags, and backlinks. The vault is not a message store — it is a curated knowledge base. The graph view stays performant because promotion is controlled. Obsidian graph view degrades noticeably above ~10,000 notes; the SQLite tier absorbs high-volume traffic before it reaches the vault.
+Significant findings are **promoted** from SQLite into the KB as proper markdown notes with wikilinks, tags, and backlinks. The KB is not a message store — it is a curated knowledge base served as a Quartz static site. The content stays performant and human-navigable because promotion is controlled (the SQLite tier absorbs high-volume traffic before it reaches the KB).
 
 ### API: Self-Describing OpenAPI Endpoint
 
@@ -95,7 +95,7 @@ Methodology content lives in git. Execution history and outcomes live in SQLite.
 
 **Semantic Discovery via ChromaDB** — A sync job triggered by GitLab webhooks pulls methodology metadata and descriptions into a ChromaDB collection on each commit. When an agent starts an investigation, it queries ChromaDB semantically before attempting to derive methodology from scratch. Discovery path: ChromaDB. Retrieval path: GitLab API. Execution record path: SQLite.
 
-### Promotion: SQLite → Obsidian Vault
+### Promotion: SQLite → Quartz Knowledge Base
 
 Promotion is how significant agent findings become curated knowledge. Three trigger types:
 
@@ -127,7 +127,7 @@ Methodology versioning uses explicit parent references (`parent_version` field) 
 | Methodology repo | GitLab | Versioning, MR workflow, CI/CD, webhooks |
 | Agent skills | Python HTTP client | Self-updating via OpenAPI spec fetch |
 | Human UI | Lightweight web app | Serves markdown rendered, SSE stream |
-| Knowledge base | Obsidian vault | Graph view, Bases, wikilinks, YAML frontmatter |
+| Knowledge base | Quartz 4 static site | Wikilinks, YAML frontmatter, browsable KB |
 | Detection format | Sigma rules | Cross-platform, CI/CD validatable |
 
 ---
@@ -166,19 +166,19 @@ Methodology versioning uses explicit parent references (`parent_version` field) 
 - [ ] Validation state machine: proposed → peer_reviewed → validated → deprecated
 - [ ] Sigma rule CI/CD pipeline in GitLab methodology repo
 
-### Phase 4 — Obsidian Vault Bridge
+### Phase 4 — Knowledge Base Bridge
 *Promotion pipeline from SQLite into curated knowledge.*
 
 - [x] Corroboration detection job: identify messages referencing same entity from N agents
 - [x] Human promotion UI: review queue, one-click promote, narrative edit before write
 - [x] Entity extractor: parse markdown body for hostnames, IPs, CVEs, actor names
-- [x] Wikilink resolver: check vault for existing note, generate link or create stub
-- [x] Vault writer: produce properly structured markdown note with frontmatter, wikilinks, source attribution
+- [x] Wikilink resolver: check KB for existing note, generate link or create stub
+- [x] KB writer: produce properly structured markdown note with frontmatter, wikilinks, source attribution
 - [x] Deduplication: append/update existing notes rather than creating duplicates
-- [ ] GitLab webhook → ChromaDB sync (also needed here for vault-level methodology links)
+- [ ] GitLab webhook → ChromaDB sync (also needed here for KB-level methodology links)
 
 ### Phase 4.2 — IT Domain Expansion
-*Five new topic databases, IT entity patterns, domain-aware vault routing, playbook support.*
+*Five new topic databases, IT entity patterns, domain-aware KB routing, playbook support.*
 
 - [x] `cairn/db/schema/topic_common.sql` — shared messages table DDL for all new topic DBs
 - [x] Five new topic databases registered: `aws`, `azure`, `networking`, `systems`, `pam`
@@ -215,7 +215,7 @@ Methodology versioning uses explicit parent references (`parent_version` field) 
 
 **Agents and humans share the same artifact.** Never build a separate human view that diverges from what agents read. The YAML+markdown format is the contract.
 
-**SQLite is the inbox, the vault is the knowledge base.** High volume goes to SQLite. Significance earns promotion to the vault. The vault stays curated and the graph stays performant.
+**SQLite is the inbox, the KB is the knowledge base.** High volume goes to SQLite. Significance earns promotion to the KB. The KB stays curated and browsable.
 
 **GitLab owns methodology content, SQLite owns execution history.** Never store methodology text in the database. Store the commit SHA so you always know exactly what was run.
 

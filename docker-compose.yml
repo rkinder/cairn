@@ -1,25 +1,24 @@
 version: "3.9"
 
-# Cairn Phase 4 stack
+# Cairn Phase 4.6 stack
 #
 # Services:
-#   cairn-api  — FastAPI blackboard server (port 8000)
-#   chromadb   — ChromaDB vector store for methodology + vault-notes semantic search (host port 8001)
-#   gitlab     — GitLab CE for methodology version control (host port 8080 / 2222)
-#   couchdb    — CouchDB for Obsidian LiveSync (host port 5984)
+#   cairn-api      — FastAPI blackboard server (port 8000)
+#   chromadb       — ChromaDB vector store for semantic search (host port 8001)
+#   gitlab         — GitLab CE for methodology version control (host port 8080 / 2222)
+#   quartz-server  — Nginx serving the Quartz KB static site
 #
 # Volumes:
 #   cairn_data   — SQLite databases
 #   chroma_data  — ChromaDB persistence
 #   gitlab_*     — GitLab configuration, logs, and data
-#   couchdb_data — CouchDB persistence
 #
 # Bind mounts:
-#   CAIRN_VAULT_PATH (host) → /vault (container) — Obsidian vault directory
-#   The vault must be pre-initialised by Obsidian before starting the stack.
+#   CAIRN_QUARTZ_CONTENT_DIR (host) → content dir inside Quartz project
+#   /opt/quartz-kb/public (host) → Nginx web root (read-only)
 #
 # Quick start:
-#   cp .env.example .env          # fill in CAIRN_GITLAB_TOKEN, CAIRN_GITLAB_PROJECT_ID, CAIRN_VAULT_PATH
+#   cp .env.example .env          # fill in required variables
 #   docker compose up -d
 #   docker compose exec cairn-api cairn-admin init-db
 #   docker compose exec cairn-api cairn-admin migrate
@@ -40,18 +39,13 @@ services:
       - "8000:8000"
     volumes:
       - cairn_data:/data
-      # Obsidian vault bind mount — same path inside container as on host
-      # so vault_path in config works consistently.
-      - ${CAIRN_VAULT_PATH:-/vault}:/vault
+      - ${CAIRN_QUARTZ_CONTENT_DIR:-./cairn_kb_content}:/kb_content
     environment:
       CAIRN_DATA_DIR: /data
       CAIRN_HOST: 0.0.0.0
       CAIRN_PORT: "8000"
       CAIRN_RELOAD: "false"
       # GitLab integration — set all of these in .env.
-      # Note: CAIRN_GITLAB_URL must be the internal Docker service URL
-      # (http://gitlab), not localhost:8080. The 8080:80 port mapping is
-      # host-side only; inside the network nginx listens on port 80.
       CAIRN_GITLAB_URL: ${CAIRN_GITLAB_URL}
       CAIRN_GITLAB_TOKEN: ${CAIRN_GITLAB_TOKEN}
       CAIRN_GITLAB_PROJECT_ID: ${CAIRN_GITLAB_PROJECT_ID}
@@ -61,25 +55,18 @@ services:
       CAIRN_CHROMA_HOST: chromadb
       CAIRN_CHROMA_PORT: "8000"
       CAIRN_CHROMA_COLLECTION: ${CAIRN_CHROMA_COLLECTION:-methodologies}
-      # Obsidian vault bridge (Phase 4)
-      CAIRN_VAULT_PATH: /vault
+      # Knowledge Base (Phase 4.6 — Quartz)
+      CAIRN_QUARTZ_CONTENT_DIR: /kb_content
+      CAIRN_QUARTZ_SYNC_CMD: ${CAIRN_QUARTZ_SYNC_CMD:-}
       CAIRN_VAULT_COLLECTION: ${CAIRN_VAULT_COLLECTION:-vault-notes}
       CAIRN_CORROBORATION_N: ${CAIRN_CORROBORATION_N:-2}
       CAIRN_CORROBORATION_WINDOW_HOURS: ${CAIRN_CORROBORATION_WINDOW_HOURS:-24}
       CAIRN_PROMOTION_CONFIDENCE_THRESHOLD: ${CAIRN_PROMOTION_CONFIDENCE_THRESHOLD:-0.7}
-      # CouchDB vault sync (Phase 4.4) — connects to the couchdb service
-      COUCHDB_URL: http://couchdb:5984
-      COUCHDB_USER: ${COUCHDB_USER}
-      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
-      COUCHDB_DATABASE: ${COUCHDB_DATABASE:-obsidian-livesync}
-      CAIRN_COUCHDB_ENABLED: ${CAIRN_COUCHDB_ENABLED:-true}
       # Security
       CAIRN_SECRET_KEY: ${CAIRN_SECRET_KEY}
     depends_on:
       chromadb:
         condition: service_started
-      couchdb:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -127,12 +114,7 @@ services:
     environment:
       GITLAB_OMNIBUS_CONFIG: |
         external_url 'http://localhost:8080'
-        # nginx must listen on port 80 so Docker's 8080:80 mapping works.
-        # Without this, Omnibus derives port 8080 from external_url and gives
-        # both nginx AND puma a bind on 8080 — nginx wins, puma crash-loops.
         nginx['listen_port'] = 80
-        # Puma only needs the unix socket; nginx proxies through it. Give puma
-        # an unused TCP port so it doesn't try to bind nginx's port.
         puma['port'] = 9292
         gitlab_rails['gitlab_shell_ssh_port'] = 2222
         # Reduce memory usage for development.
@@ -150,36 +132,22 @@ services:
       start_period: 300s
 
   # ---------------------------------------------------------------------------
-  # CouchDB — Obsidian LiveSync backend (Phase 4)
+  # Quartz KB — static site serving promoted intelligence (Phase 4.6)
   #
-  # Obsidian LiveSync uses CouchDB to sync the vault between the container
-  # and client devices (laptops, tablets).  Cairn itself only writes files
-  # to the bind-mounted vault directory — CouchDB replication is handled
-  # entirely by the LiveSync plugin configured in each Obsidian client.
+  # Serves the Quartz-built static site. Content is generated by the
+  # cairn-api sync worker after each promotion, or manually via:
+  #   docker run --rm -v /opt/quartz-kb:/app -w /app node:22-slim npx quartz build
   #
-  # Setup (one-time):
-  #   1. Access the CouchDB admin UI at http://localhost:5984/_utils
-  #   2. Create a database named 'obsidian-livesync' (default) or set COUCHDB_DATABASE in .env
-  #   3. In Obsidian LiveSync settings, point to http://<host>:5984 with
-  #      the credentials set here (COUCHDB_USER / COUCHDB_PASSWORD).
+  # See docs/spec/phase4.6/quartz-setup.md for initial Quartz project setup.
   # ---------------------------------------------------------------------------
-  couchdb:
-    image: couchdb:3
-    container_name: cairn-couchdb
+  quartz-server:
+    image: nginx:stable-alpine
+    container_name: cairn-kb
     ports:
-      - "5984:5984"
+      - "${CAIRN_KB_PORT:-8080}:80"
     volumes:
-      - couchdb_data:/opt/couchdb/data
-    environment:
-      COUCHDB_USER: ${COUCHDB_USER}
-      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
+      - ${CAIRN_QUARTZ_PROJECT_DIR:-/opt/quartz-kb}/public:/usr/share/nginx/html:ro
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5984/"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +163,4 @@ volumes:
   gitlab_logs:
     driver: local
   gitlab_data:
-    driver: local
-  couchdb_data:
     driver: local
