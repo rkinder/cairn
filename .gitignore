@@ -18,6 +18,9 @@ pip-wheel-metadata/
 lib/
 lib64/
 
+#AI
+.claude/
+
 # Virtual environments
 .venv/
 venv/
