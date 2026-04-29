@@ -147,6 +147,7 @@ services:
       - "${CAIRN_KB_PORT:-8080}:80"
     volumes:
       - ${CAIRN_QUARTZ_PROJECT_DIR:-/opt/quartz-kb}/public:/usr/share/nginx/html:ro
+      - ${CAIRN_QUARTZ_PROJECT_DIR:-/opt/quartz-kb}/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
 
