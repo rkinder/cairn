@@ -613,6 +613,11 @@ function buildPromoCard(cand) {
         <textarea class="promo-narrative" ${!isPending ? 'readonly' : ''}
           rows="4">${escapeHtml(cand.narrative || '')}</textarea>
       </div>
+      ${isPending ? `
+      <div>
+        <div class="promo-title-label">Note title (auto-derived from body if blank):</div>
+        <input class="promo-title" type="text" placeholder="${escapeHtml(cand.entity)}" />
+      </div>` : ''}
       ${vaultLinkHtml}
       ${isPending ? `
         <div class="promo-actions">
@@ -661,6 +666,7 @@ async function doPromote(candidateId, card) {
     return;
   }
   const narrative = card.querySelector('.promo-narrative')?.value || '';
+  const title     = card.querySelector('.promo-title')?.value.trim() || undefined;
 
   const promoteBtn  = card.querySelector('.btn-promote');
   const dismissBtn  = card.querySelector('.btn-dismiss');
@@ -674,7 +680,7 @@ async function doPromote(candidateId, card) {
         'X-Human-Reviewer': 'true',
         'X-Reviewer-Identity': reviewerIdentity,
       },
-      body: JSON.stringify({ narrative }),
+      body: JSON.stringify({ narrative, ...(title ? { title } : {}) }),
     });
     await loadPromotionCandidates();
   } catch (err) {

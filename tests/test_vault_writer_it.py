@@ -211,3 +211,81 @@ class TestEntityTypeToTag:
     def test_unknown_type_falls_through(self):
         """Unknown entity types return the type string itself (safe fallback)."""
         assert _entity_type_to_tag("future_type") == "future_type"
+
+
+class TestHumanFriendlyTitles:
+    async def test_title_param_overrides_entity_in_frontmatter(self, tmp_path: Path):
+        """When ``title`` is provided, it appears as ``title:`` not the entity value."""
+        result = await write_note(
+            tmp_path,
+            entity="msg:abc-123",
+            entity_type="actor",
+            narrative="A finding without extractable entities.",
+            source_message_ids=SOURCE_IDS,
+            confidence=0.9,
+            promoted_at=PROMOTED_AT,
+            title="Investigation into suspicious lateral movement",
+        )
+        content = (tmp_path / result.kb_rel).read_text(encoding="utf-8")
+        assert "title: Investigation into suspicious lateral movement" in content
+        # Filename still uses entity since only the frontmatter title is overridden.
+        assert result.kb_rel == "cairn/msg_abc-123.md"
+
+    async def test_no_title_derives_from_heading_in_body(self, tmp_path: Path):
+        """Without a title param, the first ## heading in the body becomes the frontmatter title."""
+        result = await write_note(
+            tmp_path,
+            entity="msg:xyz-456",
+            entity_type="cve",
+            narrative="## CVE-2024-99999 Critical RCE Vulnerability\n\nBuffer overflow in parser component.",
+            source_message_ids=SOURCE_IDS,
+            confidence=0.95,
+            promoted_at=PROMOTED_AT,
+        )
+        content = (tmp_path / result.kb_rel).read_text(encoding="utf-8")
+        assert "title: CVE-2024-99999 Critical RCE Vulnerability" in content
+
+    async def test_no_title_no_heading_derives_first_paragraph(self, tmp_path: Path):
+        """When no title param and no heading, first paragraph of body becomes the title."""
+        result = await write_note(
+            tmp_path,
+            entity="msg:def-789",
+            entity_type="ipv4",
+            narrative="Inbound connection from 198.51.100.42 flagged by firewall rules.\n\nSecond paragraph content.",
+            source_message_ids=SOURCE_IDS,
+            confidence=0.8,
+            promoted_at=PROMOTED_AT,
+        )
+        content = (tmp_path / result.kb_rel).read_text(encoding="utf-8")
+        assert "title: Inbound connection from 198.51.100.42 flagged by firewall rules" in content
+
+    async def test_no_title_no_body_falls_back_to_entity(self, tmp_path: Path):
+        """When no title param and no body, entity value becomes the title as last resort."""
+        result = await write_note(
+            tmp_path,
+            entity="msg:only-uuid-entity",
+            entity_type="actor",
+            narrative="",
+            source_message_ids=SOURCE_IDS,
+            confidence=0.5,
+            promoted_at=PROMOTED_AT,
+        )
+        content = (tmp_path / result.kb_rel).read_text(encoding="utf-8")
+        assert "title: msg:only-uuid-entity" in content
+
+    async def test_explicit_title_truncates_to_80_chars(self, tmp_path: Path):
+        """Title overrides entity; if exceeding 80 chars it is truncated in frontmatter."""
+        long_title = "A" * 120
+        result = await write_note(
+            tmp_path,
+            entity="apt-north-korea",
+            entity_type="actor",
+            narrative="APT activity summary.",
+            source_message_ids=SOURCE_IDS,
+            confidence=0.9,
+            promoted_at=PROMOTED_AT,
+            title=long_title,
+        )
+        content = (tmp_path / result.kb_rel).read_text(encoding="utf-8")
+        assert "title: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" in content
+        assert "title: A" * 121 not in content  # not full 120

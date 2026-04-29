@@ -64,6 +64,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from cairn.kb.sync_worker import get_sync_queue
+from cairn.nlp.entity_extractor import derive_title
 from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,7 @@ async def write_note(
     related_links: list[str] | None = None,
     domain: str | None = None,
     source_findings: list[dict] | None = None,
+    title: str | None = None,
 ) -> WriteResult:
     """Write or update an Obsidian vault note for a promoted entity.
 
@@ -143,6 +145,9 @@ async def write_note(
         target_dir = vault_root / _CAIRN_SUBDIR
         kb_rel_prefix = _CAIRN_SUBDIR
 
+    # Derive a human-readable title for the frontmatter if not provided.
+    effective_title = title or derive_title(narrative, entity)
+
     target_dir.mkdir(parents=True, exist_ok=True)
 
     safe_name = _safe_filename(entity)
@@ -172,6 +177,7 @@ async def write_note(
             related_links=related_links or [],
             now_iso=now_iso,
             source_findings=source_findings,
+            title=effective_title,
         )
         note_file.write_text(content, encoding="utf-8")
         logger.info("vault/writer: created new note %s", kb_rel)
@@ -285,6 +291,7 @@ def _build_new_note(
     related_links: list[str],
     now_iso: str,
     source_findings: list[dict] | None = None,
+    title: str | None = None,
 ) -> str:
     """Render the full markdown content for a brand-new vault note."""
 
@@ -322,7 +329,7 @@ def _build_new_note(
 
     return (
         f"---\n"
-        f"title: {entity}\n"
+        f"title: {title or entity}\n"
         f"tags: {tags_yaml}\n"
         f"entity_type: {entity_type}\n"
         f"{conf_line}"

@@ -59,6 +59,37 @@ from typing import Sequence
 
 
 # ---------------------------------------------------------------------------
+# Title derivation helper
+# ---------------------------------------------------------------------------
+
+# Match Markdown ATX headings: up to 6 #, space, then heading text.
+_RE_HEADING = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+
+
+def derive_title(body: str, fallback: str) -> str:
+    """Derive a human-readable title from a message body.
+
+    1. First ATX heading (``# Title`` or ``## Title``) if found.
+    2. First non-empty line of the body, stripped and truncated to 80 chars.
+    3. ``fallback`` (typically the entity value).
+
+    ``fallback`` is returned verbatim so callers can pass ``f"msg:{msg_id}"``
+    as the last-resort title — the note filename will then be ``msg:...`` which
+    is the documented current behaviour for entirely un-entity messages.
+    """
+    # Look for the first ATX heading at any level.
+    m = _RE_HEADING.search(body)
+    if m:
+        return m.group(2).strip()[:80]
+    # Fall back to the first non-empty line, split on double-newline (paragraph).
+    first_para = body.strip().split("\n\n")[0].strip()
+    if first_para:
+        # Collapse the line to a single short string.
+        return first_para.replace("\n", " ").replace("\r", "").strip()[:80]
+    return fallback
+
+
+# ---------------------------------------------------------------------------
 # Entity dataclass
 # ---------------------------------------------------------------------------
 

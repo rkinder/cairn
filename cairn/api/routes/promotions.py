@@ -45,7 +45,7 @@ from cairn.api.deps import authenticated_agent, get_db_manager
 from cairn.config import get_settings
 from cairn.db.connections import DatabaseManager
 from cairn.jobs.promotion_scorer import PromotionScorer
-from cairn.nlp.entity_extractor import extract
+from cairn.nlp.entity_extractor import derive_title, extract
 from cairn.sync.chroma_sync import _procedure_doc_id
 from cairn.sync.vault_sync import get_vault_collection, upsert_vault_note
 from cairn.vault.wikilink_resolver import WikilinkResolver
@@ -95,6 +95,15 @@ class PromoteRequest(BaseModel):
     methodology_kind: Literal["sigma", "procedure"] | None = Field(
         default=None,
         description="Optional methodology kind. Use 'procedure' to promote a procedural note.",
+    )
+    title: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable title for the KB note. "
+            "Auto-derived from message body if not provided. "
+            "Used as the ``title`` frontmatter field and the ``title:`` YAML value; "
+            "the note filename is still derived from the entity value."
+        ),
     )
 
 
@@ -464,6 +473,7 @@ async def promote_candidate(
                 related_links=related_links,
                 domain=entity_domain,
                 source_findings=source_findings,
+                title=body.title,
             )
     except Exception as exc:
         logger.exception("promote_candidate: vault write failed for %s", candidate_id)
@@ -495,10 +505,11 @@ async def promote_candidate(
             }
             vault_col.upsert(ids=[doc_id], documents=[document], metadatas=[metadata])
         else:
+            effective_title = body.title or derive_title(narrative, entity)
             upsert_vault_note(
                 vault_col,
                 kb_path=kb_rel,
-                title=entity,
+                title=effective_title,
                 summary=narrative[:500] if narrative else "",
                 entity_type=entity_type,
                 confidence=confidence,
