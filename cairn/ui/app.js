@@ -405,10 +405,12 @@ function renderDetailPanel(msg) {
   if (!isAgent && (!msg.promote || msg.promote === 'none')) {
     nominateBtn.classList.remove('hidden');
     nominateBtn.onclick = async () => {
-      const reviewerIdentity = document.getElementById('reviewer-identity').value.trim();
+      const reviewerInput = document.getElementById('reviewer-identity');
+      let reviewerIdentity = reviewerInput ? reviewerInput.value.trim() : '';
       if (!reviewerIdentity) {
-        alert('Enter your name or ID in the reviewer bar above before nominating.');
-        return;
+        reviewerIdentity = prompt('Enter your name or ID to nominate this message:');
+        if (!reviewerIdentity) return;
+        if (reviewerInput) reviewerInput.value = reviewerIdentity;
       }
       try {
         await apiFetch(`/messages/${msg.id}/promote?db=${encodeURIComponent(msg.topic_db)}`, {
