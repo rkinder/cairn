@@ -2,13 +2,15 @@
 -- All agents hit this database first to discover topic databases
 -- and to perform cross-domain queries without touching topic DBs directly.
 --
--- Schema version: 5
+-- Schema version: 7
 -- Migration strategy: bump _schema_meta 'schema_version' and add
 --   a corresponding migration in cairn/db/migrations/.
 -- v1 → v2: added methodology_executions table (Phase 3).
 -- v2 → v3: added promotion_candidates table (Phase 4).
 -- v3 → v4: added entity_domain column to promotion_candidates (Phase 4.2).
 -- v4 → v5: added topic_db column to promotion_candidates (Bug 002 fix).
+-- v5 → v6: renamed vault_path to kb_path in promotion_candidates (Phase 4.6).
+-- v6 → v7: added deleted_at/deleted_by to message records (message deletion API).
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -24,7 +26,7 @@ CREATE TABLE IF NOT EXISTS _schema_meta (
 );
 
 INSERT OR IGNORE INTO _schema_meta (key, value) VALUES
-    ('schema_version', '5'),
+    ('schema_version', '7'),
     ('domain',         'index');
 
 
@@ -108,7 +110,9 @@ CREATE TABLE IF NOT EXISTS message_index (
     promote         TEXT NOT NULL DEFAULT 'none'
                         CHECK (promote IN ('none', 'candidate', 'promoted', 'rejected')),
     timestamp       TEXT NOT NULL,                              -- ISO8601, agent-supplied
-    ingested_at     TEXT NOT NULL                               -- ISO8601, server-set
+    ingested_at     TEXT NOT NULL,                              -- ISO8601, server-set
+    deleted_at      TEXT,                                       -- ISO8601 soft-delete timestamp
+    deleted_by      TEXT                                        -- agent_id who deleted
     -- No ext column: this is a projection of messages, not an independent entity.
     -- Add fields here only when a corresponding field is added to messages.
 );
@@ -120,6 +124,7 @@ CREATE INDEX IF NOT EXISTS idx_midx_type       ON message_index(message_type);
 CREATE INDEX IF NOT EXISTS idx_midx_timestamp  ON message_index(timestamp);
 CREATE INDEX IF NOT EXISTS idx_midx_promote    ON message_index(promote);
 CREATE INDEX IF NOT EXISTS idx_midx_tlp        ON message_index(tlp_level);
+CREATE INDEX IF NOT EXISTS idx_midx_deleted_at ON message_index(deleted_at);
 
 
 -- ---------------------------------------------------------------------------

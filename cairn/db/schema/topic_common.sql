@@ -2,7 +2,7 @@
 -- Used as the schema source for aws, azure, networking, systems, pam databases.
 -- Mirrors the messages table in osint.sql exactly.
 --
--- Schema version: 1
+-- Schema version: 2
 --
 -- NOTE: _schema_meta INSERTs (schema_version, domain) are injected
 -- programmatically by init.py for each database — do NOT add INSERT rows here.
@@ -48,12 +48,15 @@ CREATE TABLE IF NOT EXISTS messages (
     body            TEXT NOT NULL DEFAULT '',   -- markdown body only
     timestamp       TEXT NOT NULL,              -- ISO8601, agent-supplied
     ingested_at     TEXT NOT NULL,              -- ISO8601, server-set on receipt
+    deleted_at      TEXT,                       -- ISO8601 soft-delete timestamp
+    deleted_by      TEXT,                       -- agent_id who deleted
     ext             TEXT NOT NULL DEFAULT '{}'  -- JSON extension point for future envelope fields
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_agent     ON messages(agent_id);
 CREATE INDEX IF NOT EXISTS idx_messages_thread    ON messages(thread_id);
 CREATE INDEX IF NOT EXISTS idx_messages_type      ON messages(message_type);
+CREATE INDEX IF NOT EXISTS idx_messages_deleted_at ON messages(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_promote   ON messages(promote);
 CREATE INDEX IF NOT EXISTS idx_messages_tlp       ON messages(tlp_level);

@@ -1,7 +1,7 @@
 -- osint.db — open-source intelligence topic database
 -- Stores raw messages plus structured OSINT entities, relationships, and sources.
 --
--- Schema version: 1
+-- Schema version: 2
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS _schema_meta (
 );
 
 INSERT OR IGNORE INTO _schema_meta (key, value) VALUES
-    ('schema_version', '1'),
+    ('schema_version', '2'),
     ('domain',         'osint');
 
 
@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS messages (
     body            TEXT NOT NULL DEFAULT '',   -- markdown body only
     timestamp       TEXT NOT NULL,              -- ISO8601, agent-supplied
     ingested_at     TEXT NOT NULL,              -- ISO8601, server-set on receipt
+    deleted_at      TEXT,                       -- ISO8601 soft-delete timestamp
+    deleted_by      TEXT,                       -- agent_id who deleted
     ext             TEXT NOT NULL DEFAULT '{}'  -- JSON extension point for future envelope fields
 );
 
@@ -57,6 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_type     ON messages(message_type);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_promote  ON messages(promote);
 CREATE INDEX IF NOT EXISTS idx_messages_tlp      ON messages(tlp_level);
+CREATE INDEX IF NOT EXISTS idx_messages_deleted_at ON messages(deleted_at);
 
 
 -- ---------------------------------------------------------------------------
