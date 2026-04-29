@@ -523,6 +523,26 @@ select.filter-input {
   font-size: .8rem;
 }
 
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  flex-shrink: 0;
+}
+
+.btn-promote {
+  background: var(--accent);
+  color: #fff;
+  font-size: .75rem;
+  padding: .2rem .55rem;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+}
+
+.btn-promote:hover { opacity: .85; }
+.btn-promote.hidden { display: none; }
+
 .detail-tags {
   padding: .5rem 1rem;
   display: flex;

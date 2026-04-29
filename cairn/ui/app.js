@@ -397,6 +397,46 @@ function renderDetailPanel(msg) {
   // Raw frontmatter
   document.getElementById('detail-frontmatter').textContent =
     JSON.stringify(msg.frontmatter, null, 2);
+
+  // Nominate button — only show for non-agents (human reviewers)
+  // and only when the message hasn't already been nominated.
+  const nominateBtn = document.getElementById('btn-nominate');
+  const isAgent = state.apiKey && state.apiKey.startsWith('cairn_agentkey_');
+  if (!isAgent && (!msg.promote || msg.promote === 'none')) {
+    nominateBtn.classList.remove('hidden');
+    nominateBtn.onclick = async () => {
+      const reviewerIdentity = document.getElementById('reviewer-identity').value.trim();
+      if (!reviewerIdentity) {
+        alert('Enter your name or ID in the reviewer bar above before nominating.');
+        return;
+      }
+      try {
+        await apiFetch(`/messages/${msg.id}/promote?db=${encodeURIComponent(msg.topic_db)}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Human-Reviewer': 'true',
+            'X-Reviewer-Identity': reviewerIdentity,
+          },
+          body: JSON.stringify({ promote: 'candidate' }),
+        });
+        // Refresh the message in the list to reflect new promote status.
+        msg.promote = 'candidate';
+        renderDetailPanel(msg);
+        const card = document.querySelector(`[data-id="${msg.id}"]`);
+        if (card) {
+          const badge = card.querySelector('.badge-promote-none');
+          if (badge) badge.outerHTML = promoteBadgeHtml('candidate');
+        }
+        updatePromotionBadge();
+      } catch (err) {
+        alert(`Failed to nominate: ${err.message}`);
+      }
+    };
+  } else {
+    nominateBtn.classList.add('hidden');
+    nominateBtn.onclick = null;
+  }
 }
 
 function showEmptyState(msg) {

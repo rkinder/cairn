@@ -25,7 +25,7 @@ from typing import Annotated
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from cairn.api.broadcast import MessageBroadcaster
@@ -410,9 +410,11 @@ async def get_message(
     response_model=PromoteResponse,
     summary="Flag a message for promotion",
     description=(
-        "Updates the promote status of a message.  Only the agent that posted "
-        "the message may change its promote status.  Sets promote=candidate by "
-        "default; humans use the web UI to advance to promoted or rejected."
+        "Updates the promote status of a message.  Agents may only change the "
+        "status of messages they authored.  Human reviewers may nominate any "
+        "message by setting X-Human-Reviewer: true and X-Reviewer-Identity headers.  "
+        "Sets promote=candidate by default; humans use the web UI to advance "
+        "to promoted or rejected."
     ),
 )
 async def flag_for_promotion(
@@ -422,10 +424,12 @@ async def flag_for_promotion(
     agent: Annotated[dict, Depends(authenticated_agent)],
     db: Annotated[DatabaseManager, Depends(get_db_manager)],
     broadcaster: Annotated[MessageBroadcaster, Depends(get_broadcaster)],
+    x_human_reviewer: Annotated[str | None, Header(alias="X-Human-Reviewer")] = None,
+    x_reviewer_identity: Annotated[str | None, Header(alias="X-Reviewer-Identity")] = None,
 ) -> PromoteResponse:
     valid_topic_db(db_name, db)
 
-    # Verify the message exists and belongs to the authenticated agent.
+    # Verify the message exists.
     cursor = await db.topic_conn(db_name).execute(
         "SELECT id, agent_id, thread_id, message_type, tags, timestamp, ingested_at, tlp_level "
         "FROM messages WHERE id = :id",
@@ -439,12 +443,15 @@ async def flag_for_promotion(
             detail=f"Message '{message_id}' not found in database '{db_name}'.",
         )
 
-    if row["agent_id"] != agent["id"]:
+    # Human reviewers may promote any message; agents may only promote their own.
+    is_human = (x_human_reviewer or "").lower() == "true"
+    if not is_human and row["agent_id"] != agent["id"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
                 f"Only the authoring agent ('{row['agent_id']}') may change "
-                "the promote status of this message."
+                "the promote status of this message. "
+                "Human reviewers: set X-Human-Reviewer: true and X-Reviewer-Identity headers."
             ),
         )
 

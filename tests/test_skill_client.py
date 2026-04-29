@@ -319,6 +319,70 @@ class TestFlagForPromotion:
             with pytest.raises(ForbiddenError):
                 await other_bb.flag_for_promotion(result.id, db="osint")
 
+    async def test_human_reviewer_can_nominate_other_agent_message(
+        self, bb, live_app, data_dir, tmp_path,
+    ):
+        """Human reviewers with X-Human-Reviewer: true may nominate any message."""
+        import aiosqlite
+        from datetime import datetime, timezone
+        from cairn.api.auth import hash_api_key
+
+        # Create a second agent.
+        other_id  = "other-agent-02"
+        other_key = "cairn_otherkey_xyz"
+        now       = datetime.now(tz=timezone.utc).isoformat()
+        async with aiosqlite.connect(data_dir / "index.db") as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO agents "
+                "(id, display_name, description, api_key_hash, capabilities, allowed_dbs, is_active, created_at, ext) "
+                "VALUES (?, '', '', ?, '[]', '[]', 1, ?, '{}')",
+                (other_id, hash_api_key(other_key), now),
+            )
+            await db.commit()
+
+        # Post a message as the original agent.
+        agent_id = "test-agent-01"
+        result = await bb.post_message(
+            db="osint", agent_id=agent_id, message_type="finding",
+            body="Authored by test-agent-01.",
+        )
+
+        # Use direct HTTP to set X-Human-Reviewer headers (BlackboardClient does not expose these).
+        other_bb = BlackboardClient(
+            base_url="http://testserver",
+            api_key=other_key,
+            spec_cache_path=tmp_path / "other_spec.json",
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=live_app),
+            base_url="http://testserver",
+            headers={"Authorization": f"Bearer {other_key}"},
+        ) as other_http:
+            other_bb._http       = other_http
+            other_bb._spec._http = other_http
+            await other_bb.refresh_spec(force=True)
+
+            # Call flag_for_promotion directly using the path only (httpx uses base_url from client).
+            # resolve_url gives us /messages/{message_id}/promote; substitute the real id.
+            _, path = other_bb._spec.resolve_url("flag_for_promotion")
+            path = path.replace("{message_id}", result.id)
+            response = await other_http.request(
+                "PATCH",
+                path,
+                params={"db": "osint"},
+                headers={
+                    "Authorization": f"Bearer {other_key}",
+                    "X-Human-Reviewer": "true",
+                    "X-Reviewer-Identity": "analyst-jane",
+                    "Content-Type": "application/json",
+                },
+                json={"promote": "candidate"},
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["promote"] == "candidate"
+            assert data["id"] == result.id
+
 
 class TestBadAuth:
     async def test_invalid_key_raises_auth_error(self, live_app, tmp_path):
