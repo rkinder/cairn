@@ -155,7 +155,8 @@ def test_messages_table_columns_match_osint(tmp_path: Path):
     expected_columns = {
         "id", "agent_id", "thread_id", "message_type", "in_reply_to",
         "confidence", "tlp_level", "promote", "tags", "raw_content",
-        "frontmatter", "body", "timestamp", "ingested_at", "ext",
+        "frontmatter", "body", "timestamp", "ingested_at",
+        "deleted_at", "deleted_by", "ext",
     }
     schema_file = _SCHEMA_DIR / "topic_common.sql"
     db_path = tmp_path / "test.db"
@@ -252,14 +253,14 @@ def test_init_all_is_idempotent(tmp_path: Path):
 
 
 def test_existing_osint_db_untouched(tmp_path: Path):
-    """osint.db schema_version is still '1' after init_all() runs twice."""
+    """osint.db schema_version is still stable after init_all() runs twice."""
     run(init_all(tmp_path))
     run(init_all(tmp_path))
     conn = sqlite3.connect(str(tmp_path / "osint.db"))
     cur = conn.execute("SELECT value FROM _schema_meta WHERE key = 'schema_version'")
     row = cur.fetchone()
     assert row is not None
-    assert row[0] == "1"
+    assert row[0] == "2"
     conn.close()
 
 
