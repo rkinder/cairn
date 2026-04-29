@@ -382,7 +382,7 @@ def migrate_cmd(args: argparse.Namespace) -> None:
         # Detect this by checking whether the old column exists.
         if mf.stem.startswith("006_"):
             conn = _open_index()
-            cols = {r[1] for r in conn.execute(
+            cols = {r[0] for r in conn.execute(
                 "SELECT name FROM pragma_table_info('promotion_candidates')"
             )}
             conn.close()
@@ -399,6 +399,43 @@ def migrate_cmd(args: argparse.Namespace) -> None:
                 current_version = target_version
                 print(f"  [skip] {mf.name} (vault_path absent — schema already at v{target_version})")
                 continue
+
+        # Guard: migration 007 adds soft-delete columns to both index.db
+        # (message_index) and each topic DB (messages).  The SQL file only
+        # handles index.db; topic DBs are separate SQLite files so we
+        # migrate them here in Python.
+        if mf.stem.startswith("007_"):
+            data = _data_dir()
+            conn_idx = _open_index()
+            rows = conn_idx.execute(
+                "SELECT name, db_path FROM topic_databases"
+            ).fetchall()
+            conn_idx.close()
+            for row in rows:
+                db_path = data / row["db_path"]
+                if not db_path.exists():
+                    continue
+                tc = sqlite3.connect(db_path)
+                try:
+                    tables = {r[0] for r in tc.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )}
+                    if "messages" in tables:
+                        for col in ["deleted_at TEXT", "deleted_by TEXT"]:
+                            try:
+                                tc.execute(f"ALTER TABLE messages ADD COLUMN {col}")
+                            except sqlite3.OperationalError:
+                                pass  # column already exists
+                        tc.execute(
+                            "CREATE INDEX IF NOT EXISTS idx_messages_deleted_at "
+                            "ON messages(deleted_at)"
+                        )
+                        tc.commit()
+                        print(f"    ✓  {row['name']}: added soft-delete columns")
+                except Exception as exc:
+                    print(f"    [error] {row['name']}: {exc}", file=sys.stderr)
+                finally:
+                    tc.close()
 
         conn = _open_index()
         try:
