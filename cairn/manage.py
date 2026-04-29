@@ -376,6 +376,30 @@ def migrate_cmd(args: argparse.Namespace) -> None:
             continue
 
         print(f"  Applying {mf.name} …")
+
+        # Guard: migration 006 renames vault_path → kb_path, but fresh installs
+        # (schema_version >= 6) already have kb_path so the rename would fail.
+        # Detect this by checking whether the old column exists.
+        if mf.stem.startswith("006_"):
+            conn = _open_index()
+            cols = {r[1] for r in conn.execute(
+                "SELECT name FROM pragma_table_info('promotion_candidates')"
+            )}
+            conn.close()
+            if "vault_path" not in cols:
+                # vault_path already gone — schema already has kb_path.
+                # Bump the version in _schema_meta to skip the migration cleanly.
+                conn = _open_index()
+                conn.execute(
+                    "UPDATE _schema_meta SET value = ? WHERE key = 'schema_version'",
+                    (str(target_version),),
+                )
+                conn.commit()
+                conn.close()
+                current_version = target_version
+                print(f"  [skip] {mf.name} (vault_path absent — schema already at v{target_version})")
+                continue
+
         conn = _open_index()
         try:
             ddl = mf.read_text(encoding="utf-8")

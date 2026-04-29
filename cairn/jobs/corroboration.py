@@ -267,7 +267,7 @@ async def _find_existing_candidate(
         SELECT id FROM promotion_candidates
         WHERE entity_type = ?
           AND lower(entity) = lower(?)
-          AND status IN ('pending_review', 'promoted')
+          AND status IN ('pending_review', 'promoted', 'dismissed')
         LIMIT 1
         """,
         (entity_type, entity),
