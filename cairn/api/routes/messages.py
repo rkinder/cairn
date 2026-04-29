@@ -34,6 +34,7 @@ from cairn.api.deps import (
     authenticated_agent,
     get_broadcaster,
     get_db_manager,
+    require_admin,
     valid_topic_db,
 )
 from cairn.db.connections import DatabaseManager
@@ -73,6 +74,8 @@ class MessageSummary(BaseModel):
     promote: str
     timestamp: str
     ingested_at: str
+    deleted_at: str | None = None
+    deleted_by: str | None = None
 
 
 class MessageDetail(MessageSummary):
@@ -82,6 +85,29 @@ class MessageDetail(MessageSummary):
     raw_content: str
     frontmatter: dict
     ext: dict
+
+
+class DeleteMessageResponse(BaseModel):
+    id: str
+    topic_db: str
+    deleted: bool
+    hard_deleted: bool = False
+    deleted_at: str | None = None
+    deleted_by: str | None = None
+
+
+class BulkDeleteResponse(BaseModel):
+    topic_db: str
+    tags: list[str]
+    deleted_count: int
+    deleted_ids: list[str]
+
+
+class DeleteThreadResponse(BaseModel):
+    topic_db: str
+    thread_id: str
+    deleted_count: int
+    deleted_ids: list[str]
 
 
 class PromoteRequest(BaseModel):
@@ -202,12 +228,19 @@ async def get_messages(
     # Pagination
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    include_deleted: Annotated[bool, Query(description="Include soft-deleted messages (admin only).")] = False,
 ) -> list[MessageSummary]:
     if db_name:
         valid_topic_db(db_name, db)
 
+    if include_deleted:
+        require_admin(_agent)
+
     where_clauses: list[str] = []
     params: dict = {}
+
+    if not include_deleted:
+        where_clauses.append("mi.deleted_at IS NULL")
 
     if db_name:
         where_clauses.append(
@@ -264,7 +297,9 @@ async def get_messages(
             mi.tlp_level,
             mi.promote,
             mi.timestamp,
-            mi.ingested_at
+            mi.ingested_at,
+            mi.deleted_at,
+            mi.deleted_by
         FROM message_index mi
         JOIN topic_databases td ON td.id = mi.topic_db_id
         {where_sql}
@@ -315,6 +350,7 @@ async def get_message(
     db_name: Annotated[str, Query(alias="db", description="Topic database slug.")],
     db: Annotated[DatabaseManager, Depends(get_db_manager)],
     _agent: Annotated[dict, Depends(authenticated_agent)],
+    include_deleted: Annotated[bool, Query(description="Return deleted record if present (admin only).")] = False,
 ) -> MessageDetail:
     valid_topic_db(db_name, db)
 
@@ -323,7 +359,7 @@ async def get_message(
         SELECT
             id, agent_id, thread_id, message_type, in_reply_to,
             confidence, tlp_level, promote, tags,
-            raw_content, frontmatter, body, timestamp, ingested_at, ext
+            raw_content, frontmatter, body, timestamp, ingested_at, deleted_at, deleted_by, ext
         FROM messages WHERE id = :id
         """,
         {"id": message_id},
@@ -331,6 +367,12 @@ async def get_message(
     row = await cursor.fetchone()
 
     if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message '{message_id}' not found in database '{db_name}'.",
+        )
+
+    if row["deleted_at"] is not None and not include_deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Message '{message_id}' not found in database '{db_name}'.",
@@ -349,6 +391,8 @@ async def get_message(
         promote=row["promote"],
         timestamp=row["timestamp"],
         ingested_at=row["ingested_at"],
+        deleted_at=row["deleted_at"],
+        deleted_by=row["deleted_by"],
         body=row["body"],
         raw_content=row["raw_content"],
         frontmatter=json.loads(row["frontmatter"]),
@@ -463,4 +507,256 @@ async def flag_for_promotion(
         promote=new_promote,
         confidence=final_confidence,
         updated_at=updated_at,
+    )
+
+
+@router.delete(
+    "/messages/{message_id}",
+    operation_id="delete_message",
+    response_model=DeleteMessageResponse,
+    summary="Delete a message",
+    description=(
+        "Soft-delete a message by default. "
+        "Only message owner may soft-delete. "
+        "Admin may hard-delete with ?hard=true."
+    ),
+)
+async def delete_message(
+    message_id: str,
+    db_name: Annotated[str, Query(alias="db", description="Topic database slug.")],
+    agent: Annotated[dict, Depends(authenticated_agent)],
+    db: Annotated[DatabaseManager, Depends(get_db_manager)],
+    hard: Annotated[bool, Query(description="Hard delete the message (admin only).")] = False,
+) -> DeleteMessageResponse:
+    valid_topic_db(db_name, db)
+
+    cursor = await db.topic_conn(db_name).execute(
+        "SELECT id, agent_id, deleted_at, deleted_by FROM messages WHERE id = :id",
+        {"id": message_id},
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message '{message_id}' not found in database '{db_name}'.",
+        )
+
+    if hard:
+        require_admin(agent)
+
+        async with db.topic(db_name) as conn:
+            await conn.execute("DELETE FROM messages WHERE id = :id", {"id": message_id})
+
+        async with db.index() as conn:
+            await conn.execute("DELETE FROM message_index WHERE id = :id", {"id": message_id})
+
+        return DeleteMessageResponse(
+            id=message_id,
+            topic_db=db_name,
+            deleted=True,
+            hard_deleted=True,
+            deleted_at=None,
+            deleted_by=None,
+        )
+
+    if row["agent_id"] != agent["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Only the authoring agent ('{row['agent_id']}') may soft-delete this message."
+            ),
+        )
+
+    if row["deleted_at"] is not None:
+        return DeleteMessageResponse(
+            id=message_id,
+            topic_db=db_name,
+            deleted=True,
+            hard_deleted=False,
+            deleted_at=row["deleted_at"],
+            deleted_by=row["deleted_by"],
+        )
+
+    deleted_at = datetime.now(tz=timezone.utc).isoformat()
+    deleted_by = agent["id"]
+
+    async with db.topic(db_name) as conn:
+        await conn.execute(
+            """
+            UPDATE messages
+               SET deleted_at = :deleted_at,
+                   deleted_by = :deleted_by
+             WHERE id = :id
+            """,
+            {"deleted_at": deleted_at, "deleted_by": deleted_by, "id": message_id},
+        )
+
+    async with db.index() as conn:
+        await conn.execute(
+            """
+            UPDATE message_index
+               SET deleted_at = :deleted_at,
+                   deleted_by = :deleted_by
+             WHERE id = :id
+            """,
+            {"deleted_at": deleted_at, "deleted_by": deleted_by, "id": message_id},
+        )
+
+    return DeleteMessageResponse(
+        id=message_id,
+        topic_db=db_name,
+        deleted=True,
+        hard_deleted=False,
+        deleted_at=deleted_at,
+        deleted_by=deleted_by,
+    )
+
+
+@router.delete(
+    "/messages",
+    operation_id="bulk_delete_messages_by_tag",
+    response_model=BulkDeleteResponse,
+    summary="Bulk delete messages by tags",
+    description="Soft-delete messages in a topic DB matching one or more tags (requires confirm=true).",
+)
+async def bulk_delete_messages_by_tag(
+    db_name: Annotated[str, Query(alias="db", description="Topic database slug.")],
+    tags: Annotated[str, Query(description="Comma-separated tags to match.")],
+    confirm: Annotated[bool, Query(description="Must be true to execute deletion.")],
+    agent: Annotated[dict, Depends(authenticated_agent)],
+    db: Annotated[DatabaseManager, Depends(get_db_manager)],
+) -> BulkDeleteResponse:
+    valid_topic_db(db_name, db)
+    agent_can_write(agent, db_name)
+
+    if not confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bulk delete requires confirm=true.",
+        )
+
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    if not tag_list:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least one tag must be provided.",
+        )
+
+    placeholders = ", ".join(f":tag_{i}" for i in range(len(tag_list)))
+    params = {f"tag_{i}": tag for i, tag in enumerate(tag_list)}
+
+    cursor = await db.topic_conn(db_name).execute(
+        f"""
+        SELECT id
+          FROM messages
+         WHERE deleted_at IS NULL
+           AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value IN ({placeholders}))
+        """,
+        params,
+    )
+    rows = await cursor.fetchall()
+    ids = [r["id"] for r in rows]
+
+    if not ids:
+        return BulkDeleteResponse(topic_db=db_name, tags=tag_list, deleted_count=0, deleted_ids=[])
+
+    deleted_at = datetime.now(tz=timezone.utc).isoformat()
+    deleted_by = agent["id"]
+
+    for message_id in ids:
+        async with db.topic(db_name) as conn:
+            await conn.execute(
+                """
+                UPDATE messages
+                   SET deleted_at = :deleted_at,
+                       deleted_by = :deleted_by
+                 WHERE id = :id
+                """,
+                {"deleted_at": deleted_at, "deleted_by": deleted_by, "id": message_id},
+            )
+        async with db.index() as conn:
+            await conn.execute(
+                """
+                UPDATE message_index
+                   SET deleted_at = :deleted_at,
+                       deleted_by = :deleted_by
+                 WHERE id = :id
+                """,
+                {"deleted_at": deleted_at, "deleted_by": deleted_by, "id": message_id},
+            )
+
+    return BulkDeleteResponse(
+        topic_db=db_name,
+        tags=tag_list,
+        deleted_count=len(ids),
+        deleted_ids=ids,
+    )
+
+
+@router.delete(
+    "/messages/thread/{thread_id}",
+    operation_id="delete_message_thread",
+    response_model=DeleteThreadResponse,
+    summary="Delete all messages in a thread",
+    description="Soft-delete all non-deleted messages in the specified thread and topic database.",
+)
+async def delete_message_thread(
+    thread_id: str,
+    db_name: Annotated[str, Query(alias="db", description="Topic database slug.")],
+    agent: Annotated[dict, Depends(authenticated_agent)],
+    db: Annotated[DatabaseManager, Depends(get_db_manager)],
+) -> DeleteThreadResponse:
+    valid_topic_db(db_name, db)
+    agent_can_write(agent, db_name)
+
+    cursor = await db.topic_conn(db_name).execute(
+        """
+        SELECT id
+          FROM messages
+         WHERE thread_id = :thread_id
+           AND deleted_at IS NULL
+        """,
+        {"thread_id": thread_id},
+    )
+    rows = await cursor.fetchall()
+    ids = [r["id"] for r in rows]
+
+    if not ids:
+        return DeleteThreadResponse(
+            topic_db=db_name,
+            thread_id=thread_id,
+            deleted_count=0,
+            deleted_ids=[],
+        )
+
+    deleted_at = datetime.now(tz=timezone.utc).isoformat()
+    deleted_by = agent["id"]
+
+    for message_id in ids:
+        async with db.topic(db_name) as conn:
+            await conn.execute(
+                """
+                UPDATE messages
+                   SET deleted_at = :deleted_at,
+                       deleted_by = :deleted_by
+                 WHERE id = :id
+                """,
+                {"deleted_at": deleted_at, "deleted_by": deleted_by, "id": message_id},
+            )
+        async with db.index() as conn:
+            await conn.execute(
+                """
+                UPDATE message_index
+                   SET deleted_at = :deleted_at,
+                       deleted_by = :deleted_by
+                 WHERE id = :id
+                """,
+                {"deleted_at": deleted_at, "deleted_by": deleted_by, "id": message_id},
+            )
+
+    return DeleteThreadResponse(
+        topic_db=db_name,
+        thread_id=thread_id,
+        deleted_count=len(ids),
+        deleted_ids=ids,
     )

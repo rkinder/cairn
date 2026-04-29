@@ -140,3 +140,21 @@ def agent_can_write(agent: dict, db_name: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Agent '{agent['id']}' is not authorised to write to '{db_name}'.",
         )
+
+
+def agent_is_admin(agent: dict) -> bool:
+    """Return True if the agent has admin capability."""
+    try:
+        capabilities = json.loads(agent.get("capabilities", "[]"))
+    except Exception:
+        capabilities = []
+    return "admin" in capabilities
+
+
+def require_admin(agent: dict) -> None:
+    """Raise HTTP 403 unless the authenticated agent has admin capability."""
+    if not agent_is_admin(agent):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin capability required for this operation.",
+        )
